@@ -2,15 +2,16 @@
 // All rights reserved.
 
 // This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. 
+// LICENSE file in the root directory of this source tree.
 
 extern crate exitcode;
 
 use std::env;
 use std::process;
 
+use rcc::debug;
+use rcc::parser::Parser;
 use rcc::scanner::Scanner;
-use rcc::scanner::token::TokenType;
 
 fn help(prog_name: &str) {
     println!(
@@ -37,32 +38,16 @@ fn main() {
 
     println!("Compiling input file {}", input_fname);
 
-    let scanner = Scanner::new(input_fname).unwrap_or_else(|err| {
+    let mut scanner = Scanner::new(input_fname).unwrap_or_else(|err| {
         eprintln!("Could not load input file:\n{}", err);
         process::exit(exitcode::DATAERR);
     });
 
-    compile(scanner);
-}
+    let mut parser = Parser::new(&mut scanner).unwrap_or_else(|err| {
+        eprintln!("Could not initialise parser:\n{}", err);
+        process::exit(exitcode::DATAERR);
+    });
 
-fn compile(mut scanner: Scanner) {
-    loop {
-        match scanner.consume() {
-            Ok(tok) => {
-                match tok.token_type  {
-                    TokenType::EOF => {
-                        println!("Reached end of input file.");
-                        process::exit(exitcode::OK);
-                    },
-                    _ => {
-                        println!("{:?}", tok);
-                    }
-                }
-            },
-            Err(e) => {
-                eprintln!("Error scanning tokens:\n{}", e);
-                process::exit(exitcode::DATAERR);
-            }
-        }
-    }
+    let print_statement = parser.print_statement().unwrap();
+    debug::print_tree(print_statement.as_ref(), 0);
 }

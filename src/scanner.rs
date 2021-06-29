@@ -2,9 +2,9 @@
 // All rights reserved.
 
 // This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. 
+// LICENSE file in the root directory of this source tree.
 
-use std::fmt;
+use std::error::Error;
 use std::fs;
 
 pub mod token;
@@ -13,18 +13,8 @@ use token::{Token, TokenType};
 
 pub struct Scanner {
     input_file_chars: Box<dyn Iterator<Item = char>>,
-    current_token: Token,
     line_number: u16,
     putback_char: Option<char>,
-}
-
-#[derive(Debug)]
-pub struct ScannerError(String);
-
-impl fmt::Display for ScannerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
 
 impl Scanner {
@@ -33,9 +23,9 @@ impl Scanner {
     // TODO: Currently the scanner loads the entire input file, perhaps
     // it is possible to incremental read parts of the file into a buffer instead
     // Idea: Load entire line so that we can even illustrate where errors are found
-    pub fn new(input_fname: &str) -> Result<Scanner, ScannerError> {
+    pub fn new(input_fname: &str) -> Result<Scanner, Box<dyn Error>> {
         let file_contents = fs::read_to_string(input_fname)
-            .map_err(|e| ScannerError(format!("Error reading file {}: {}", input_fname, e)))?;
+            .map_err(|e| format!("Error reading file {}: {}", input_fname, e))?;
 
         Ok(Scanner::new_from_string(file_contents))
     }
@@ -43,19 +33,13 @@ impl Scanner {
     fn new_from_string(input_str: String) -> Scanner {
         Scanner {
             input_file_chars: Box::new(input_str.chars().collect::<Vec<_>>().into_iter()),
-            current_token: Token::new(TokenType::EOF),
             line_number: 1,
             putback_char: None,
         }
     }
 
-    // Returns a pointer to current Token
-    pub fn current(&self) -> &Token {
-        &self.current_token
-    }
-
     // Consume current token and scan in the next one
-    pub fn consume(&mut self) -> Result<&Token, ScannerError> {
+    pub fn next_token(&mut self) -> Result<Token, Box<dyn Error>> {
         let mut int_value = 0;
         let token_type = match self.next_char() {
             Some(c) => match c {
@@ -67,29 +51,22 @@ impl Scanner {
                 '(' => TokenType::LPAREN,
                 ')' => TokenType::RPAREN,
                 '0'..='9' => {
-                    int_value = self.scan_int(c);
+                    int_value = self.scan_int(c) as i32;
                     TokenType::INTLIT
                 }
                 c if c.is_alphabetic() => {
                     let lexeme = self.scan_ident(c);
-                    match self.token_type_from_lexeme(&lexeme) {
-                        Ok(t) => t,
-                        Err(e) => {
-                            return Err(e);
-                        }
-                    }
+                    self.token_type_from_lexeme(&lexeme)?
                 }
-                _ => return Err(ScannerError(format!("Unknown character found: {}", c))),
+                _ => return Err(format!("Unknown character found: {}", c).into()),
             },
             None => TokenType::EOF,
         };
 
-        self.current_token = Token {
+        Ok(Token {
             token_type,
             int_value,
-        };
-
-        Ok(&self.current_token)
+        })
     }
 
     fn _next_char(&mut self) -> Option<char> {
@@ -181,7 +158,7 @@ impl Scanner {
 
     // Distinguish between identifiers and specific token types
     // based on a lexeme
-    fn token_type_from_lexeme(&self, lexeme: &str) -> Result<TokenType, ScannerError> {
+    fn token_type_from_lexeme(&self, lexeme: &str) -> Result<TokenType, String> {
         let token_type = match lexeme {
             lexeme if lexeme.starts_with('p') => match lexeme {
                 "print" => Some(TokenType::PRINT),
@@ -190,10 +167,10 @@ impl Scanner {
             _ => None,
         };
 
-        token_type.ok_or(ScannerError(format!(
+        token_type.ok_or(format!(
             "Unknown token found: {} on line number {}",
             lexeme, self.line_number
-        )))
+        ))
     }
 }
 
@@ -223,7 +200,7 @@ mod tests {
         assert_eq!(scanner.next_char(), Some('p'));
         assert_eq!(scanner.scan_ident('p'), "print");
 
-        let expected_types: Vec<(TokenType,u32)> = vec![
+        let expected_types: Vec<(TokenType, u32)> = vec![
             (TokenType::PRINT, 0),
             (TokenType::LPAREN, 0),
             (TokenType::INTLIT, 42),
@@ -236,7 +213,7 @@ mod tests {
 
         let mut res_idx = 1;
         loop {
-            match scanner.consume() {
+            match scanner.next_token() {
                 Ok(tok) => {
                     let (token_type, int_value) = expected_types[res_idx];
                     assert_eq!(tok.token_type, token_type);
@@ -247,7 +224,7 @@ mod tests {
                     }
                 }
                 Err(e) => {
-                    panic!("Failed to consume token with error {}", e);
+                    panic!("Failed to next_token token with error {}", e);
                 }
             };
         }
