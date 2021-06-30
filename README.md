@@ -5,3 +5,5 @@ A C compiler written in Rust. I decided to do this project to consolidate my und
 I will try to document the progress of this project as best as I can. I will most probably only be noting down important milestones.
 
 29/6/2021 - Started the project. Implemented a simple scanner that supports a limited set of tokens.
+
+30/6/2021 - Implemented a Pratt parser for expression parsing.

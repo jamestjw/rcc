@@ -6,13 +6,14 @@
 use std::error::Error;
 
 use crate::enum_str;
-use crate::scanner::{
-    token::{Token, TokenType},
-    Scanner,
-};
+use crate::scanner::Scanner;
+use crate::token::{Token, TokenType};
+
+mod expression;
+mod statement;
 
 enum_str! {
-    #[derive(PartialEq)]
+    #[derive(Debug, PartialEq)]
     pub enum ASTop {
         ADD,
         MINUS,
@@ -31,6 +32,35 @@ pub struct ASTnode {
     pub int_value: i32,
 }
 
+impl ASTnode {
+    fn new_leaf(int_value: i32) -> Box<ASTnode> {
+        Box::new(ASTnode {
+            op: ASTop::INTLIT,
+            left: None,
+            right: None,
+            int_value: int_value,
+        })
+    }
+
+    fn new_unary(op: ASTop, left: Box<ASTnode>) -> Box<ASTnode> {
+        Box::new(ASTnode {
+            op: op,
+            left: Some(left),
+            right: None,
+            int_value: 0,
+        })
+    }
+
+    fn new_boxed(op: ASTop, left: Box<ASTnode>, right: Box<ASTnode>) -> Box<ASTnode> {
+        Box::new(ASTnode {
+            op,
+            left: Some(left),
+            right: Some(right),
+            int_value: 0,
+        })
+    }
+}
+
 pub struct Parser<'a> {
     token_generator: &'a mut Scanner,
     current_token: Option<Token>,
@@ -43,49 +73,6 @@ impl<'a> Parser<'a> {
             token_generator,
             current_token: Some(first_token),
         })
-    }
-
-    // TODO: Split up statements and expressions to separate files
-    pub fn print_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        self.match_token(TokenType::PRINT)?;
-        self.match_token(TokenType::LPAREN)?;
-        let binary_node = self.binary_expr()?;
-        self.match_token(TokenType::RPAREN)?;
-        self.match_token(TokenType::SEMI)?;
-
-        Ok(Box::new(ASTnode {
-            op: ASTop::PRINT,
-            left: Some(binary_node),
-            right: None,
-            int_value: 0,
-        }))
-    }
-
-    pub fn binary_expr(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        let left = self.primary_expr()?;
-
-        // TODO: Support other operators and support nested expressions
-        self.match_token(TokenType::PLUS)?;
-
-        let right = self.primary_expr()?;
-
-        Ok(Box::new(ASTnode {
-            op: ASTop::ADD,
-            left: Some(left),
-            right: Some(right),
-            int_value: 0,
-        }))
-    }
-
-    pub fn primary_expr(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        let int_token = self.match_token(TokenType::INTLIT)?;
-
-        Ok(Box::new(ASTnode {
-            op: ASTop::INTLIT,
-            left: None,
-            right: None,
-            int_value: int_token.int_value,
-        }))
     }
 
     // Consume current_token and load next token as the current_token
@@ -108,20 +95,38 @@ impl<'a> Parser<'a> {
                     return self.consume();
                 } else {
                     return Err(format!(
-                        "Syntax error, expected {} token but {} was found instead.",
-                        token_type.name(),
-                        tok.token_type.name()
+                        "Syntax error, expected '{}' token but '{}' was found instead.",
+                        token_type, tok.token_type
                     )
                     .into());
                 }
             }
             None => {
                 return Err(format!(
-                    "Syntax error, expected {} token but no more tokens were found.",
-                    token_type.name()
+                    "Syntax error, expected '{}' token but no more tokens were found.",
+                    token_type
                 )
                 .into());
             }
+        }
+    }
+}
+
+#[cfg(test)]
+fn match_ast_node(actual: Option<Box<ASTnode>>, expected: Box<ASTnode>) {
+    match actual {
+        Some(actual) => {
+            assert_eq!(actual.op, expected.op);
+            assert_eq!(actual.int_value, expected.int_value);
+            if let Some(left) = expected.left {
+                match_ast_node(actual.left, left);
+            }
+            if let Some(right) = expected.right {
+                match_ast_node(actual.right, right);
+            }
+        }
+        None => {
+            panic!("Node empty.")
         }
     }
 }

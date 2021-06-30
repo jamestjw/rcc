@@ -7,9 +7,7 @@
 use std::error::Error;
 use std::fs;
 
-pub mod token;
-
-use token::{Token, TokenType};
+use crate::token::{Token, TokenType};
 
 pub struct Scanner {
     input_file_chars: Box<dyn Iterator<Item = char>>,
@@ -30,7 +28,7 @@ impl Scanner {
         Ok(Scanner::new_from_string(file_contents))
     }
 
-    fn new_from_string(input_str: String) -> Scanner {
+    pub fn new_from_string(input_str: String) -> Scanner {
         Scanner {
             input_file_chars: Box::new(input_str.chars().collect::<Vec<_>>().into_iter()),
             line_number: 1,
@@ -200,7 +198,7 @@ mod tests {
         assert_eq!(scanner.next_char(), Some('p'));
         assert_eq!(scanner.scan_ident('p'), "print");
 
-        let expected_types: Vec<(TokenType, u32)> = vec![
+        let expected_types: Vec<(TokenType, i32)> = vec![
             (TokenType::PRINT, 0),
             (TokenType::LPAREN, 0),
             (TokenType::INTLIT, 42),

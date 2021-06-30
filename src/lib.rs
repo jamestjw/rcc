@@ -7,9 +7,8 @@
 pub mod debug;
 pub mod parser;
 pub mod scanner;
+pub mod token;
 
-// TODO: Find a way make it possible remove the requirement to define
-// the specific traits we want to derive within the macro
 #[macro_export]
 macro_rules! enum_str {
     (#[derive($($trait:ident),*)]
