@@ -48,6 +48,10 @@ fn main() {
         process::exit(exitcode::DATAERR);
     });
 
-    let print_statement = parser.print_statement().unwrap();
+    let print_statement = parser.print_statement().unwrap_or_else(|err| {
+        eprintln!("Failed to parse print statement:\n{}", err);
+        process::exit(exitcode::DATAERR);
+    });
+
     debug::print_tree(print_statement.as_ref(), 0);
 }
