@@ -40,6 +40,7 @@ impl fmt::Display for TokenType {
         }
     }
 }
+
 pub struct Token {
     pub token_type: TokenType,
     pub int_value: i32,

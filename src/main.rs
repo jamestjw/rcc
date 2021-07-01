@@ -6,52 +6,35 @@
 
 extern crate exitcode;
 
-use std::env;
+use rcc::compile;
 use std::process;
 
-use rcc::debug;
-use rcc::parser::Parser;
-use rcc::scanner::Scanner;
+use structopt::StructOpt;
 
-fn help(prog_name: &str) {
-    println!(
-        "Usage: {} [option] file [file ...]
-Options:
-        -h  : print this help message and exit (also --help)",
-        prog_name
-    );
+#[derive(StructOpt, Debug)]
+#[structopt(
+    name = "rcc",
+    about = "A C-compiler written in Rust by James Tan for pedagogical purposes."
+)]
+struct Opt {
+    #[structopt(short, long, help = "Output file path", default_value = "./out.s")]
+    outfile: String,
+    #[structopt(
+        required = true,
+        help = "List of input files to compile (it currently only supports one input file)"
+    )]
+    infiles: Vec<String>,
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let opt = Opt::from_args();
 
-    // TODO: Make this more robust and accept flags
-    if args.len() != 2 {
-        eprintln!("Unexpected arguments received");
-        help(&args[0]);
-        process::exit(exitcode::USAGE);
+    // TODO: Support more than one input file
+    match compile(&opt.infiles[0], &opt.outfile) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("{}", e);
+            process::exit(exitcode::DATAERR);
+        }
     }
-
-    // TODO: Handle --help
-
-    let input_fname = &args[1];
-
-    println!("Compiling input file {}", input_fname);
-
-    let mut scanner = Scanner::new(input_fname).unwrap_or_else(|err| {
-        eprintln!("Could not load input file:\n{}", err);
-        process::exit(exitcode::DATAERR);
-    });
-
-    let mut parser = Parser::new(&mut scanner).unwrap_or_else(|err| {
-        eprintln!("Could not initialise parser:\n{}", err);
-        process::exit(exitcode::DATAERR);
-    });
-
-    let print_statement = parser.print_statement().unwrap_or_else(|err| {
-        eprintln!("Failed to parse print statement:\n{}", err);
-        process::exit(exitcode::DATAERR);
-    });
-
-    debug::print_tree(print_statement.as_ref(), 0);
 }

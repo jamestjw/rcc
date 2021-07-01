@@ -7,3 +7,16 @@ I will try to document the progress of this project as best as I can. I will mos
 29/6/2021 - Started the project. Implemented a simple scanner that supports a limited set of tokens.
 
 30/6/2021 - Implemented a Pratt parser for expression parsing.
+
+3/7/2021 - Implemented code generator and set up integration tests.
+
+## Tests
+To run all unit tests only
+``` bash
+cargo test --test '*'
+```
+
+To run all integration tests only
+``` bash
+cargo test --lib
+```
