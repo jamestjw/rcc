@@ -10,6 +10,8 @@ I will try to document the progress of this project as best as I can. I will mos
 
 3/7/2021 - Implemented code generator and set up integration tests.
 
+5/7/2021 - Implemented support for declaration and assignation to global variables.
+
 ## Tests
 To run all unit tests only
 ``` bash

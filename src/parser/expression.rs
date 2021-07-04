@@ -24,30 +24,59 @@ impl<'a> Parser<'a> {
 
                 self.consume()?;
 
-                let right = self.binary_expr(r_bp)?;
+                let mut right = self.binary_expr(r_bp)?;
+
+                if op_tok_type == TokenType::ASSIGN {
+                    right.rvalue = true;
+                } else {
+                    left.rvalue = true;
+                    right.rvalue = true;
+                }
 
                 left = ASTnode::new_boxed(token_type_to_binary_op(op_tok_type), left, right);
             } else {
                 break;
             }
         }
+        left.rvalue = true;
+
         Ok(left)
     }
 
     pub fn primary_expr(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
         match &self.current_token {
-            Some(tok) => {
-                if tok.token_type == TokenType::LPAREN {
+            Some(tok) => match tok.token_type {
+                TokenType::LPAREN => {
                     self.consume()?;
                     let expr = self.binary_expr(0)?;
                     self.match_token(TokenType::RPAREN)?;
                     Ok(expr)
-                } else {
-                    Ok(ASTnode::new_leaf(
-                        self.match_token(TokenType::INTLIT)?.int_value,
-                    ))
                 }
-            }
+                TokenType::IDENT => {
+                    let token = self.match_token(TokenType::IDENT)?;
+                    let symtable_entry = match self.global_symbol_table.get(&token.lexeme) {
+                        Some(new_sym) => new_sym,
+                        None => {
+                            return Err(
+                                format!("Referencing undefined variable {}", &token.lexeme).into()
+                            )
+                        }
+                    };
+                    let mut node = ASTnode::new_leaf(ASTop::IDENT, 0);
+                    node.symtable_entry = Some(Rc::clone(symtable_entry));
+
+                    Ok(node)
+                }
+                TokenType::INTLIT => Ok(ASTnode::new_leaf(
+                    ASTop::INTLIT,
+                    self.match_token(TokenType::INTLIT)?.int_value,
+                )),
+                _ => Err(format!(
+                    "Syntax error, expected primary expression but found '{}' instead.",
+                    tok.token_type
+                )
+                .into()),
+            },
             None => {
                 return Err(format!(
                     "Syntax error, expected primary expression but no more tokens were found.",
@@ -61,8 +90,9 @@ impl<'a> Parser<'a> {
 // How tightly this operator binds operands to its left and right
 fn infix_binding_power(op: TokenType) -> Option<(u8, u8)> {
     let res = match op {
-        TokenType::PLUS | TokenType::MINUS => (1, 2),
-        TokenType::STAR | TokenType::SLASH => (3, 4),
+        TokenType::ASSIGN => (10, 5),
+        TokenType::PLUS | TokenType::MINUS => (20, 30),
+        TokenType::STAR | TokenType::SLASH => (40, 50),
         _ => return None,
     };
     Some(res)
@@ -74,6 +104,7 @@ fn token_type_to_binary_op(token_type: TokenType) -> ASTop {
         TokenType::MINUS => ASTop::MINUS,
         TokenType::SLASH => ASTop::DIVIDE,
         TokenType::STAR => ASTop::MULTIPLY,
+        TokenType::ASSIGN => ASTop::ASSIGN,
         _ => {
             panic!("Unknown binary op from token type: {}", token_type);
         }
@@ -89,9 +120,13 @@ mod tests {
         let mut scanner = Scanner::new_from_string(String::from("51+24;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
         let expr = parser.binary_expr(0).unwrap();
-        let expected = ASTnode::new_boxed(ASTop::ADD, ASTnode::new_leaf(51), ASTnode::new_leaf(24));
+        let expected = ASTnode::new_boxed(
+            ASTop::ADD,
+            ASTnode::new_leaf(ASTop::INTLIT, 51),
+            ASTnode::new_leaf(ASTop::INTLIT, 24),
+        );
 
-        match_ast_node(Some(expr), expected);
+        match_ast_node(Some(&expr), expected);
     }
 
     #[test]
@@ -99,9 +134,13 @@ mod tests {
         let mut scanner = Scanner::new_from_string(String::from("(51+24);"));
         let mut parser = Parser::new(&mut scanner).unwrap();
         let expr = parser.binary_expr(0).unwrap();
-        let expected = ASTnode::new_boxed(ASTop::ADD, ASTnode::new_leaf(51), ASTnode::new_leaf(24));
+        let expected = ASTnode::new_boxed(
+            ASTop::ADD,
+            ASTnode::new_leaf(ASTop::INTLIT, 51),
+            ASTnode::new_leaf(ASTop::INTLIT, 24),
+        );
 
-        match_ast_node(Some(expr), expected);
+        match_ast_node(Some(&expr), expected);
     }
 
     #[test]
@@ -132,7 +171,7 @@ mod tests {
             Err(r) => {
                 assert_eq!(
                     r.to_string(),
-                    "Syntax error, expected 'integer literal' token but '+' was found instead."
+                    "Syntax error, expected primary expression but found '+' instead."
                 )
             }
         }
@@ -148,7 +187,7 @@ mod tests {
             Err(r) => {
                 assert_eq!(
                     r.to_string(),
-                    "Syntax error, expected 'integer literal' token but ';' was found instead."
+                    "Syntax error, expected primary expression but found ';' instead."
                 )
             }
         }
@@ -162,11 +201,15 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
-            ASTnode::new_leaf(1),
-            ASTnode::new_boxed(ASTop::MULTIPLY, ASTnode::new_leaf(2), ASTnode::new_leaf(3)),
+            ASTnode::new_leaf(ASTop::INTLIT, 1),
+            ASTnode::new_boxed(
+                ASTop::MULTIPLY,
+                ASTnode::new_leaf(ASTop::INTLIT, 2),
+                ASTnode::new_leaf(ASTop::INTLIT, 3),
+            ),
         );
 
-        match_ast_node(Some(expr), expected);
+        match_ast_node(Some(&expr), expected);
     }
 
     #[test]
@@ -177,11 +220,19 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::MINUS,
-            ASTnode::new_boxed(ASTop::DIVIDE, ASTnode::new_leaf(50), ASTnode::new_leaf(10)),
-            ASTnode::new_boxed(ASTop::MULTIPLY, ASTnode::new_leaf(20), ASTnode::new_leaf(4)),
+            ASTnode::new_boxed(
+                ASTop::DIVIDE,
+                ASTnode::new_leaf(ASTop::INTLIT, 50),
+                ASTnode::new_leaf(ASTop::INTLIT, 10),
+            ),
+            ASTnode::new_boxed(
+                ASTop::MULTIPLY,
+                ASTnode::new_leaf(ASTop::INTLIT, 20),
+                ASTnode::new_leaf(ASTop::INTLIT, 4),
+            ),
         );
 
-        match_ast_node(Some(expr), expected);
+        match_ast_node(Some(&expr), expected);
     }
 
     #[test]
@@ -194,12 +245,41 @@ mod tests {
             ASTop::MULTIPLY,
             ASTnode::new_boxed(
                 ASTop::DIVIDE,
-                ASTnode::new_leaf(50),
-                ASTnode::new_boxed(ASTop::MINUS, ASTnode::new_leaf(10), ASTnode::new_leaf(20)),
+                ASTnode::new_leaf(ASTop::INTLIT, 50),
+                ASTnode::new_boxed(
+                    ASTop::MINUS,
+                    ASTnode::new_leaf(ASTop::INTLIT, 10),
+                    ASTnode::new_leaf(ASTop::INTLIT, 20),
+                ),
             ),
-            ASTnode::new_leaf(4),
+            ASTnode::new_leaf(ASTop::INTLIT, 4),
         );
 
-        match_ast_node(Some(expr), expected);
+        match_ast_node(Some(&expr), expected);
+    }
+
+    #[test]
+    fn parse_simple_assignment() {
+        let mut scanner = Scanner::new_from_string(String::from("x = 5;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0);
+        let expr = parser.binary_expr(0).unwrap();
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0),
+            ASTnode::new_leaf(ASTop::INTLIT, 5),
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        match expr.left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym, &s));
+            }
+            None => {
+                panic!("ASTnode does not contain reference to symtable entry.");
+            }
+        }
     }
 }

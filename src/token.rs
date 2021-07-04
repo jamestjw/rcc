@@ -10,6 +10,7 @@ enum_str! {
     #[derive(Debug, PartialEq, Copy, Clone)]
     pub enum TokenType {
         EOF,
+        ASSIGN,
         PLUS,
         MINUS,
         SLASH,
@@ -19,6 +20,7 @@ enum_str! {
         LPAREN,
         RPAREN,
         PRINT, // Temporary until we have function calls
+        INT,
         SEMI,
     }
 }
@@ -27,6 +29,7 @@ impl fmt::Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TokenType::EOF => write!(f, "EOF"),
+            TokenType::ASSIGN => write!(f, "="),
             TokenType::PLUS => write!(f, "+"),
             TokenType::MINUS => write!(f, "-"),
             TokenType::SLASH => write!(f, "/"),
@@ -36,6 +39,7 @@ impl fmt::Display for TokenType {
             TokenType::LPAREN => write!(f, "("),
             TokenType::RPAREN => write!(f, ")"),
             TokenType::PRINT => write!(f, "print"),
+            TokenType::INT => write!(f, "int"),
             TokenType::SEMI => write!(f, ";"),
         }
     }
@@ -44,13 +48,15 @@ impl fmt::Display for TokenType {
 pub struct Token {
     pub token_type: TokenType,
     pub int_value: i32,
+    pub lexeme: String,
 }
 
 impl Token {
-    pub fn new(token_type: TokenType) -> Token {
+    pub fn new(token_type: TokenType, lexeme: String) -> Token {
         Token {
             token_type,
             int_value: 0,
+            lexeme: lexeme,
         }
     }
 }

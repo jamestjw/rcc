@@ -3,67 +3,24 @@
 
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
+use std::collections::HashMap;
 use std::error::Error;
 
-use crate::enum_str;
-use crate::scanner::Scanner;
-use crate::token::{Token, TokenType};
-
+mod ast_node;
 mod expression;
 mod statement;
+mod symbol_table;
 
-enum_str! {
-    #[derive(Debug, PartialEq)]
-    pub enum ASTop {
-        ADD,
-        MINUS,
-        MULTIPLY,
-        DIVIDE,
-        INTLIT,
-        PRINT,
-    }
-
-}
-
-pub struct ASTnode {
-    pub op: ASTop,
-    pub left: Option<Box<ASTnode>>,
-    pub right: Option<Box<ASTnode>>,
-    pub int_value: i32,
-}
-
-impl ASTnode {
-    fn new_leaf(int_value: i32) -> Box<ASTnode> {
-        Box::new(ASTnode {
-            op: ASTop::INTLIT,
-            left: None,
-            right: None,
-            int_value: int_value,
-        })
-    }
-
-    fn new_unary(op: ASTop, left: Box<ASTnode>) -> Box<ASTnode> {
-        Box::new(ASTnode {
-            op: op,
-            left: Some(left),
-            right: None,
-            int_value: 0,
-        })
-    }
-
-    fn new_boxed(op: ASTop, left: Box<ASTnode>, right: Box<ASTnode>) -> Box<ASTnode> {
-        Box::new(ASTnode {
-            op,
-            left: Some(left),
-            right: Some(right),
-            int_value: 0,
-        })
-    }
-}
+use crate::scanner::Scanner;
+use crate::token::{Token, TokenType};
+pub use ast_node::*;
+use std::rc::Rc;
+pub use symbol_table::*;
 
 pub struct Parser<'a> {
     token_generator: &'a mut Scanner,
     current_token: Option<Token>,
+    pub global_symbol_table: HashMap<String, Rc<SymbolTableEntry>>,
 }
 
 impl<'a> Parser<'a> {
@@ -72,6 +29,7 @@ impl<'a> Parser<'a> {
         Ok(Parser {
             token_generator,
             current_token: Some(first_token),
+            global_symbol_table: HashMap::new(),
         })
     }
 
@@ -110,19 +68,35 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
+    pub fn add_global_symbol(
+        &mut self,
+        lexeme: String,
+        data_type: DataType,
+        initial_value: i32,
+    ) -> Rc<SymbolTableEntry> {
+        let sym = Rc::new(SymbolTableEntry {
+            data_type,
+            initial_value,
+            name: lexeme.clone(),
+            size: 4,
+        });
+        self.global_symbol_table.insert(lexeme, Rc::clone(&sym));
+        sym
+    }
 }
 
 #[cfg(test)]
-fn match_ast_node(actual: Option<Box<ASTnode>>, expected: Box<ASTnode>) {
+fn match_ast_node(actual: Option<&Box<ASTnode>>, expected: Box<ASTnode>) {
     match actual {
         Some(actual) => {
             assert_eq!(actual.op, expected.op);
             assert_eq!(actual.int_value, expected.int_value);
             if let Some(left) = expected.left {
-                match_ast_node(actual.left, left);
+                match_ast_node(actual.left.as_ref(), left);
             }
             if let Some(right) = expected.right {
-                match_ast_node(actual.right, right);
+                match_ast_node(actual.right.as_ref(), right);
             }
         }
         None => {

@@ -8,6 +8,7 @@ enum Operand {
     Int(i32),
     Reg(String),
     Func(String),
+    IPOffset(String),
 }
 
 impl fmt::Display for Operand {
@@ -16,6 +17,7 @@ impl fmt::Display for Operand {
             Operand::Int(i) => write!(f, "${}", i),
             Operand::Reg(str) => write!(f, "%{}", str),
             Operand::Func(str) => write!(f, "{}", str),
+            Operand::IPOffset(str) => write!(f, "{}(%rip)", str),
         }
     }
 }
@@ -28,7 +30,7 @@ pub struct Generator_x86_64 {
 
 impl Generator_x86_64 {
     pub fn new() -> Generator_x86_64 {
-        let mut gen = Self {
+        Self {
             output_str: String::new(),
             // General purpose registers available
             // for x86-64
@@ -39,13 +41,28 @@ impl Generator_x86_64 {
                 Register::new(String::from("r12")),
                 Register::new(String::from("r13")),
             ],
-        };
-        gen.preamble();
-        gen
+        }
     }
 
     fn reg_name(&self, i: usize) -> String {
         self.registers[i].name.to_string()
+    }
+
+    fn reg_name_for_size(&self, i: usize, data_size: u8) -> String {
+        let mut name = self.registers[i].name.to_string();
+        match data_size {
+            1 => {
+                name.push('b');
+            }
+            4 => {
+                name.push('d');
+            }
+            8 => {}
+            _ => {
+                panic!("Invalid size passed to reg_name.")
+            }
+        }
+        name
     }
 
     fn gen_binary_op(&mut self, op_str: &str, op1: Operand, op2: Operand) {
@@ -76,6 +93,12 @@ impl Generator for Generator_x86_64 {
 
     fn free_register(&mut self, i: usize) {
         self.registers[i].free()
+    }
+
+    fn free_all_registers(&mut self) {
+        for i in 0..self.registers.len() {
+            self.registers[i].free = true;
+        }
     }
 
     fn load_integer(&mut self, i: i32) -> usize {
@@ -145,14 +168,61 @@ impl Generator for Generator_x86_64 {
             Operand::Reg(self.reg_name(r1)),
             Operand::Reg("rdi".into()),
         );
-        self.gen_unary_op("call", Operand::Func("printint".into()));
+        self.gen_unary_op("call", Operand::Func("printint@PLT".into()));
         self.free_register(r1);
     }
 
+    fn load_glob_var(&mut self, sym: &SymbolTableEntry) -> usize {
+        let r = self.alloc_register();
+        let op_name = match sym.size {
+            1 => "movzbq",
+            4 => "movslq",
+            8 => "movq",
+            _ => panic!("Invalid size in assign_glob_var."),
+        };
+        self.gen_binary_op(
+            op_name,
+            Operand::IPOffset(sym.name.to_string()),
+            Operand::Reg(self.reg_name(r)),
+        );
+        r
+    }
+
+    fn assign_glob_var(&mut self, sym: &SymbolTableEntry, r: usize) -> usize {
+        let op_name = match sym.size {
+            1 => "movb",
+            4 => "movl",
+            8 => "movq",
+            _ => panic!("Invalid size in assign_glob_var."),
+        };
+        self.gen_binary_op(
+            op_name,
+            Operand::Reg(self.reg_name_for_size(r, sym.size)),
+            Operand::IPOffset(sym.name.to_string()),
+        );
+        r
+    }
+
+    fn gen_glob_syms(&mut self, symtable: HashMap<String, Rc<SymbolTableEntry>>) {
+        for (sym_name, entry) in symtable {
+            self.output_str.push_str(&format!(
+                r#"    .globl  {0}
+    .bss
+    .align 4
+    .type   {0}, @object
+    .size   {0}, {1}
+{0}:
+    .zero   {1}
+"#,
+                sym_name, entry.size
+            ));
+        }
+    }
+
     fn preamble(&mut self) {
-        let code = r#"
+        let printint_code = r#"
     .text
-.LC0:
+.LCprintint:
     .string "%d\n"
 printint:
     pushq   %rbp
@@ -161,19 +231,22 @@ printint:
     movl    %edi, -4(%rbp)
     movl    -4(%rbp), %eax
     movl    %eax, %esi
-    leaq    .LC0(%rip), %rdi
+    leaq    .LCprintint(%rip), %rdi
     movl    $0, %eax
     call    printf@PLT
     nop
     leave
     ret
+"#;
+        let main_code = r#"
     .globl  main
     .type   main,   @function
 main:
     pushq   %rbp
     movq    %rsp, %rbp
 "#;
-        self.output_str.push_str(code);
+        self.output_str.push_str(printint_code);
+        self.output_str.push_str(main_code);
     }
 
     fn postamble(&mut self) {

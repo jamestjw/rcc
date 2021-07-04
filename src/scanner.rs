@@ -11,7 +11,7 @@ use crate::token::{Token, TokenType};
 
 pub struct Scanner {
     input_file_chars: Box<dyn Iterator<Item = char>>,
-    line_number: u16,
+    pub line_number: u16,
     putback_char: Option<char>,
 }
 
@@ -39,8 +39,10 @@ impl Scanner {
     // Consume current token and scan in the next one
     pub fn next_token(&mut self) -> Result<Token, Box<dyn Error>> {
         let mut int_value = 0;
+        let mut lexeme = String::new();
         let token_type = match self.next_char() {
             Some(c) => match c {
+                '=' => TokenType::ASSIGN,
                 '+' => TokenType::PLUS,
                 '-' => TokenType::MINUS,
                 '*' => TokenType::STAR,
@@ -53,8 +55,8 @@ impl Scanner {
                     TokenType::INTLIT
                 }
                 c if c.is_alphabetic() => {
-                    let lexeme = self.scan_ident(c);
-                    self.token_type_from_lexeme(&lexeme)?
+                    lexeme.push_str(&self.scan_ident(c));
+                    self.token_type_from_lexeme(&lexeme)
                 }
                 _ => return Err(format!("Unknown character found: {}", c).into()),
             },
@@ -64,6 +66,7 @@ impl Scanner {
         Ok(Token {
             token_type,
             int_value,
+            lexeme,
         })
     }
 
@@ -156,19 +159,15 @@ impl Scanner {
 
     // Distinguish between identifiers and specific token types
     // based on a lexeme
-    fn token_type_from_lexeme(&self, lexeme: &str) -> Result<TokenType, String> {
-        let token_type = match lexeme {
-            lexeme if lexeme.starts_with('p') => match lexeme {
-                "print" => Some(TokenType::PRINT),
-                _ => None,
-            },
-            _ => None,
-        };
+    fn token_type_from_lexeme(&self, lexeme: &str) -> TokenType {
+        if lexeme.starts_with('i') && lexeme == "int" {
+            return TokenType::INT;
+        }
+        if lexeme.starts_with('p') && lexeme == "print" {
+            return TokenType::PRINT;
+        }
 
-        token_type.ok_or(format!(
-            "Unknown token found: {} on line number {}",
-            lexeme, self.line_number
-        ))
+        return TokenType::IDENT;
     }
 }
 
