@@ -3,7 +3,7 @@ use crate::enum_str;
 use std::rc::Rc;
 
 enum_str! {
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Copy, Clone)]
     pub enum ASTop {
         ADD,
         MINUS,
@@ -16,6 +16,7 @@ enum_str! {
         NOOP,
         GLUE,
         FUNCTION,
+        RETURN,
     }
 
 }
@@ -27,6 +28,7 @@ pub struct ASTnode {
     pub int_value: i32,
     pub symtable_entry: Option<Rc<SymbolTableEntry>>,
     pub rvalue: bool,
+    pub label: Option<String>,
 }
 
 impl ASTnode {
@@ -38,6 +40,7 @@ impl ASTnode {
             int_value,
             symtable_entry: None,
             rvalue: false,
+            label: None,
         })
     }
 
@@ -49,6 +52,7 @@ impl ASTnode {
             int_value: 0,
             symtable_entry: None,
             rvalue: false,
+            label: None,
         })
     }
 
@@ -60,6 +64,7 @@ impl ASTnode {
             int_value: 0,
             symtable_entry: None,
             rvalue: false,
+            label: None,
         })
     }
 
@@ -71,6 +76,7 @@ impl ASTnode {
             int_value: 0,
             symtable_entry: None,
             rvalue: false,
+            label: None,
         })
     }
 }

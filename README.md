@@ -12,6 +12,8 @@ I will try to document the progress of this project as best as I can. I will mos
 
 5/7/2021 - Implemented support for declaration and assignation to global variables.
 
+7/7/2021 - Support the parsing of function declarations and return statements.
+
 ## Tests
 To run all unit tests only
 ``` bash

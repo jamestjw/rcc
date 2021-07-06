@@ -13,7 +13,6 @@ pub mod token;
 use std::process::Command;
 
 use code_generation::Generator;
-use debug::print_tree;
 
 #[macro_export]
 macro_rules! enum_str {
@@ -55,13 +54,11 @@ pub fn compile(input_fname: &str, output_fname: &str) -> Result<(), String> {
         Ok(stmt) => stmt,
         Err(err) => {
             return Err(format!(
-                "Failed to parse statements on line {}:\n{}",
-                scanner.line_number, err
+                "Error on line {} in {}:\n{}",
+                scanner.line_number, input_fname, err
             ));
         }
     };
-
-    print_tree(&stmts, 0);
 
     let mut generator = code_generation::x86_64::Generator_x86_64::new();
     generator.gen_glob_syms(parser.global_symbol_table);

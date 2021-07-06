@@ -21,6 +21,7 @@ pub struct Parser<'a> {
     token_generator: &'a mut Scanner,
     current_token: Option<Token>,
     pub global_symbol_table: HashMap<String, Rc<SymbolTableEntry>>,
+    pub current_func_sym: Option<Rc<SymbolTableEntry>>, // Current function that we are parsing
 }
 
 impl<'a> Parser<'a> {
@@ -30,6 +31,7 @@ impl<'a> Parser<'a> {
             token_generator,
             current_token: Some(first_token),
             global_symbol_table: HashMap::new(),
+            current_func_sym: None,
         })
     }
 

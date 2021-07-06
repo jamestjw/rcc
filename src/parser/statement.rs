@@ -1,4 +1,5 @@
 use super::*;
+use crate::code_generation::generate_label_for_function;
 
 impl<'a> Parser<'a> {
     pub fn parse_global_declarations(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
@@ -31,6 +32,7 @@ impl<'a> Parser<'a> {
         let statement = match &self.current_token {
             Some(tok) => match tok.token_type {
                 TokenType::PRINT => self.print_statement()?,
+                TokenType::RETURN => self.parse_return()?,
                 _ => {
                     let node = self.binary_expr(0)?;
                     self.match_token(TokenType::SEMI)?;
@@ -91,8 +93,16 @@ impl<'a> Parser<'a> {
         // We add the symbol here so that recursive calls work
         let sym = self.add_global_symbol(ident.lexeme, DataType::INT, 0, SymType::FUNCTION);
 
+        // Point to the symbol of the function we are parsing so that it can be referenced
+        // when we parse the body of the function.
+        self.current_func_sym = Some(Rc::clone(&sym));
+
+        // TODO: Is there a better way to track whether or not a return was included?
+        let mut last_op = ASTop::NOOP;
+
         while self.current_token.as_ref().unwrap().token_type != TokenType::RBRACE {
             let node = self.parse_statement()?;
+            last_op = node.op;
 
             match tree {
                 Some(original_tree) => {
@@ -104,6 +114,16 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // TODO: Ensure that return statement is included for non-void functions.
+        // Alternately, we can allow this and emit a warning
+        if last_op != ASTop::RETURN {
+            return Err("Return value must be provided in non-void function.".into());
+        }
+
+        // Since we are done parsing the body of the function, we remove the pointer
+        // to the symbol of the current function.
+        self.current_func_sym = None;
+
         self.match_token(TokenType::RBRACE)?;
 
         let mut fn_node = ASTnode::new_unary(
@@ -114,6 +134,29 @@ impl<'a> Parser<'a> {
         fn_node.symtable_entry = Some(sym);
 
         Ok(fn_node)
+    }
+
+    fn parse_return(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        if self.current_func_sym.is_none() {
+            return Err(format!("Cannot return from outside a function.").into());
+        }
+        self.match_token(TokenType::RETURN)?;
+        let binary_node = self.binary_expr(0)?;
+        self.match_token(TokenType::SEMI)?;
+
+        // TODO: Ensure that returning values is not allowed in void
+        // functions.
+        let mut ret_node = ASTnode::new_unary(
+            ASTop::RETURN,
+            binary_node, // TODO: Make this return ASTop::RETURN by default
+        );
+
+        // Unwrap since we already verified that this is not none at the beginning of the function
+        ret_node.label = Some(generate_label_for_function(&Rc::clone(
+            self.current_func_sym.as_ref().unwrap(),
+        )));
+
+        Ok(ret_node)
     }
 
     pub fn print_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
@@ -168,11 +211,14 @@ mod tests {
 
     #[test]
     fn parse_func_declaration() {
-        let mut scanner = Scanner::new_from_string(String::from("int main() {}"));
+        let mut scanner = Scanner::new_from_string(String::from("int main() { return 1; }"));
         let mut parser = Parser::new(&mut scanner).unwrap();
         let expr = parser.parse_global_declaration().unwrap().unwrap();
 
-        let expected = ASTnode::new_unary(ASTop::FUNCTION, ASTnode::new_noop());
+        let expected = ASTnode::new_unary(
+            ASTop::FUNCTION,
+            ASTnode::new_unary(ASTop::RETURN, ASTnode::new_leaf(ASTop::INTLIT, 1)),
+        );
         match_ast_node(Some(&expr), expected);
         match parser.global_symbol_table.get("main") {
             Some(new_sym) => {
@@ -181,6 +227,25 @@ mod tests {
                 assert_eq!(new_sym.sym_type, SymType::FUNCTION);
             }
             None => panic!("New symbol table entry not found"),
+        }
+    }
+
+    #[test]
+    fn parse_func_declaration_no_ret() {
+        let mut scanner = Scanner::new_from_string(String::from("int main() {}"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let expr = parser.parse_global_declaration();
+
+        match expr {
+            Ok(_) => {
+                panic!("Did not receive expected error for omitting return statement.");
+            }
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "Return value must be provided in non-void function."
+                );
+            }
         }
     }
 }

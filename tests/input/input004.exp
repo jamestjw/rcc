@@ -1,0 +1,2 @@
+Error on line 6 in tests/input/input004-err.c:
+Return value must be provided in non-void function.

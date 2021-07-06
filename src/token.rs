@@ -24,6 +24,7 @@ enum_str! {
         PRINT, // Temporary until we have function calls
         INT,
         SEMI,
+        RETURN,
     }
 }
 
@@ -45,6 +46,7 @@ impl fmt::Display for TokenType {
             TokenType::PRINT => write!(f, "print"),
             TokenType::INT => write!(f, "int"),
             TokenType::SEMI => write!(f, ";"),
+            TokenType::RETURN => write!(f, "return"),
         }
     }
 }

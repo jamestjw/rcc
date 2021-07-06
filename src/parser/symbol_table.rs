@@ -9,6 +9,8 @@ pub enum SymType {
     FUNCTION,
 }
 
+// TODO: Is there any way to reduce the number of possibly useless fields?
+// i.e. initial_value is irrelevant if sym_type == FUNCTION
 pub struct SymbolTableEntry {
     pub data_type: DataType,
     pub initial_value: i32, // Initial value for ints

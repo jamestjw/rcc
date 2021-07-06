@@ -11,19 +11,25 @@ fn generate_correct_assembly() {
     // TODO: Determine if we will handle checking for errors this way as well,
     // if not we can ditch the `-ok` in the filename
     // e.g. input filename is of the format input001-ok.c
-    let re = Regex::new(r"input(\d+)-ok.c").unwrap();
+    let re = Regex::new(r"input(?P<id>\d+)-(?P<status>ok|err).c").unwrap();
 
     for test_file in glob("./tests/input/input*.c").expect("Failed to read glob pattern") {
         match test_file {
             Ok(path) => {
                 // This is safe based on our glob pattern
                 let test_file_name = path.file_name().unwrap().to_str().unwrap();
-                print!("Testing {}", test_file_name);
+                print!("Testing {}\n", test_file_name);
 
                 let mut file_id = String::new();
-                for cap in re.captures_iter(test_file_name) {
-                    file_id.push_str(&cap[1]);
-                }
+                let mut status = String::new();
+                let cap = re.captures(test_file_name).unwrap_or_else(|| {
+                    panic!(
+                        "File: {} does not match expected filename format",
+                        test_file_name
+                    )
+                });
+                file_id.push_str(&cap["id"]);
+                status.push_str(&cap["status"]);
 
                 // Path of file containing expected results of executing the input file
                 let res_filename = format!("input{}.exp", file_id);
@@ -40,28 +46,50 @@ fn generate_correct_assembly() {
                 output_asm_path.set_extension("s");
                 let output_asm_path_str = output_asm_path.to_str().unwrap();
 
-                if let Err(e) = compile(path.to_str().unwrap(), output_asm_path_str) {
-                    panic!("Failed to compile {:?} with error {}", path, e);
-                }
+                match compile(path.to_str().unwrap(), output_asm_path_str) {
+                    Ok(_) => {
+                        if status == "err" {
+                            panic!("Compilation should have failed for {}", test_file_name);
+                        }
+                        assemble_and_link(output_asm_path_str, exec_path_str);
 
-                assemble_and_link(output_asm_path_str, exec_path_str);
+                        if let Err(e) = fs::remove_file(output_asm_path_str) {
+                            panic!("Failed to remove {} with error: {}", output_asm_path_str, e);
+                        }
 
-                if let Err(e) = fs::remove_file(output_asm_path_str) {
-                    panic!("Failed to remove {} with error: {}", output_asm_path_str, e);
-                }
+                        let actual_res = execute_file(exec_path_str);
+                        let expected_res = fs::read_to_string(res_path_str).unwrap();
 
-                let actual_res = execute_file(exec_path_str);
-                let expected_res = fs::read_to_string(res_path_str).unwrap();
+                        if let Err(e) = fs::remove_file(exec_path_str) {
+                            panic!("Failed to remove {} with error: {}", exec_path_str, e);
+                        }
 
-                if let Err(e) = fs::remove_file(exec_path_str) {
-                    panic!("Failed to remove {} with error: {}", exec_path_str, e);
-                }
-
-                if actual_res != expected_res {
-                    println!("... [failed]");
-                    panic!("Output of {} did not match expectations.", test_file_name);
-                } else {
-                    println!("... [done]");
+                        if actual_res != expected_res {
+                            println!("******* [FAILED] *******");
+                            println!("Expected:\n{}", expected_res);
+                            println!("Actual:\n{}", actual_res);
+                            panic!("Output of {} did not match expectations.", test_file_name);
+                        } else {
+                            println!("******* [PASSED] *******");
+                        }
+                    }
+                    Err(e) => {
+                        if status == "ok" {
+                            panic!("Failed to compile {:?} with error {}", path, e);
+                        }
+                        let expected_res = fs::read_to_string(res_path_str).unwrap();
+                        if expected_res != e {
+                            println!("******* [FAILED] *******");
+                            println!("Expected:\n{}", expected_res);
+                            println!("Actual:\n{}", e);
+                            panic!(
+                                "Error message does not match expectations for {}",
+                                res_path_str
+                            );
+                        } else {
+                            println!("******* [PASSED] *******");
+                        }
+                    }
                 }
             }
             Err(e) => println!("{:?}", e),

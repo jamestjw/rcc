@@ -8,4 +8,6 @@ int main() {
     print(y * 3);
     x = 1 - 7 * y - x;
     print(x);
+
+    return 1;
 }

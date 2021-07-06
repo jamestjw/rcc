@@ -1,0 +1,2 @@
+Error on line 6 in tests/input/input005-err.c:
+Syntax error, expected primary expression but found 'EOF' instead.

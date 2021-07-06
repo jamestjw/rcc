@@ -48,7 +48,8 @@ pub trait Generator {
     fn preamble(&mut self);
     fn postamble(&mut self);
     fn func_preamble(&mut self, fn_name: &str);
-    fn func_postamble(&mut self);
+    fn func_postamble(&mut self, end_label: &str);
+    fn return_from_func(&mut self, label: &str, r: Option<usize>);
     fn generate_output(&mut self, output_filename: &str) -> Result<(), Box<dyn Error>>;
 }
 
@@ -114,6 +115,10 @@ pub fn generate_code_for_node(
             let sym = node.left.as_ref()?.symtable_entry.as_ref()?;
             Some(generator.assign_glob_var(sym, right_reg?))
         }
+        ASTop::RETURN => {
+            generator.return_from_func(node.label.as_ref()?, left_reg);
+            None
+        }
         ASTop::NOOP | ASTop::GLUE => None,
     }
 }
@@ -125,5 +130,9 @@ pub fn generate_code_for_function(
 ) {
     generator.func_preamble(&sym.name);
     generate_code_for_node(generator, node);
-    generator.func_postamble();
+    generator.func_postamble(&generate_label_for_function(sym));
+}
+
+pub fn generate_label_for_function(sym: &SymbolTableEntry) -> String {
+    format!("L_{}_end", sym.name)
 }

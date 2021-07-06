@@ -168,6 +168,9 @@ impl Scanner {
         if lexeme.starts_with('p') && lexeme == "print" {
             return TokenType::PRINT;
         }
+        if lexeme.starts_with('r') && lexeme == "return" {
+            return TokenType::RETURN;
+        }
 
         return TokenType::IDENT;
     }

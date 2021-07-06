@@ -260,14 +260,14 @@ printint:
         ));
     }
 
-    fn func_postamble(&mut self) {
-        self.output_str.push_str(
-            &r#"      
-    movl    $0, %eax
+    fn func_postamble(&mut self, end_label: &str) {
+        self.output_str.push_str(&format!(
+            r#"{}:
     popq    %rbp
     ret
 "#,
-        );
+            end_label
+        ));
     }
 
     fn generate_output(&mut self, output_filename: &str) -> Result<(), Box<dyn Error>> {
@@ -281,5 +281,17 @@ printint:
         f.write_all(self.output_str.as_bytes())?;
 
         Ok(())
+    }
+
+    fn return_from_func(&mut self, label: &str, r: Option<usize>) {
+        if let Some(r) = r {
+            self.gen_binary_op(
+                "movq",
+                Operand::Reg(self.reg_name(r)),
+                Operand::Reg("rax".into()),
+            );
+            self.free_register(r);
+        }
+        self.output_str.push_str(&format!("\tjmp {}\n", label));
     }
 }

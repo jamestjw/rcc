@@ -57,9 +57,11 @@ impl<'a> Parser<'a> {
                     let symtable_entry = match self.global_symbol_table.get(&token.lexeme) {
                         Some(new_sym) => new_sym,
                         None => {
-                            return Err(
-                                format!("Referencing undefined variable {}", &token.lexeme).into()
+                            return Err(format!(
+                                "Referencing undefined variable {}.",
+                                &token.lexeme
                             )
+                            .into())
                         }
                     };
                     let mut node = ASTnode::new_leaf(ASTop::IDENT, 0);
