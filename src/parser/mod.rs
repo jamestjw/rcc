@@ -74,12 +74,14 @@ impl<'a> Parser<'a> {
         lexeme: String,
         data_type: DataType,
         initial_value: i32,
+        sym_type: SymType,
     ) -> Rc<SymbolTableEntry> {
         let sym = Rc::new(SymbolTableEntry {
             data_type,
             initial_value,
             name: lexeme.clone(),
             size: 4,
+            sym_type,
         });
         self.global_symbol_table.insert(lexeme, Rc::clone(&sym));
         sym

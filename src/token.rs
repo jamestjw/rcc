@@ -19,6 +19,8 @@ enum_str! {
         IDENT,
         LPAREN,
         RPAREN,
+        LBRACE,
+        RBRACE,
         PRINT, // Temporary until we have function calls
         INT,
         SEMI,
@@ -38,6 +40,8 @@ impl fmt::Display for TokenType {
             TokenType::IDENT => write!(f, "identifier"),
             TokenType::LPAREN => write!(f, "("),
             TokenType::RPAREN => write!(f, ")"),
+            TokenType::LBRACE => write!(f, "{{"),
+            TokenType::RBRACE => write!(f, "}}"),
             TokenType::PRINT => write!(f, "print"),
             TokenType::INT => write!(f, "int"),
             TokenType::SEMI => write!(f, ";"),

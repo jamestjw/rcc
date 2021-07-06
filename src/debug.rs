@@ -14,6 +14,9 @@ pub fn print_tree(node: &ASTnode, indentation_count: u8) {
                 node.rvalue
             );
         }
+        ASTop::FUNCTION => {
+            println!(": {}", node.symtable_entry.as_ref().unwrap().name,);
+        }
         _ => {
             println!("");
         }

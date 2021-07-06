@@ -50,6 +50,8 @@ impl Scanner {
                 ';' => TokenType::SEMI,
                 '(' => TokenType::LPAREN,
                 ')' => TokenType::RPAREN,
+                '{' => TokenType::LBRACE,
+                '}' => TokenType::RBRACE,
                 '0'..='9' => {
                     int_value = self.scan_int(c) as i32;
                     TokenType::INTLIT

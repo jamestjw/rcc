@@ -262,7 +262,7 @@ mod tests {
     fn parse_simple_assignment() {
         let mut scanner = Scanner::new_from_string(String::from("x = 5;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0);
+        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE);
         let expr = parser.binary_expr(0).unwrap();
 
         let expected = ASTnode::new_boxed(

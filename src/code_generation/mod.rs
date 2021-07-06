@@ -47,6 +47,8 @@ pub trait Generator {
     fn gen_glob_syms(&mut self, symtable: HashMap<String, Rc<SymbolTableEntry>>);
     fn preamble(&mut self);
     fn postamble(&mut self);
+    fn func_preamble(&mut self, fn_name: &str);
+    fn func_postamble(&mut self);
     fn generate_output(&mut self, output_filename: &str) -> Result<(), Box<dyn Error>>;
 }
 
@@ -57,6 +59,15 @@ pub fn generate_code_for_node(
     generator: &mut impl Generator,
     node: &Box<ASTnode>,
 ) -> Option<usize> {
+    // Special cases
+    if node.op == ASTop::FUNCTION {
+        let fn_node = node.left.as_ref()?;
+        let sym = node.symtable_entry.as_ref()?;
+
+        generate_code_for_function(generator, fn_node, sym);
+        return None;
+    }
+
     let mut left_reg: Option<usize> = None;
     if let Some(left) = &node.left {
         left_reg = generate_code_for_node(generator, left);
@@ -99,6 +110,20 @@ pub fn generate_code_for_node(
             let sym = node.left.as_ref()?.symtable_entry.as_ref()?;
             Some(generator.assign_glob_var(sym, right_reg?))
         }
+        ASTop::FUNCTION => {
+            let sym = node.left.as_ref()?.symtable_entry.as_ref()?;
+            Some(generator.assign_glob_var(sym, right_reg?))
+        }
         ASTop::NOOP | ASTop::GLUE => None,
     }
+}
+
+pub fn generate_code_for_function(
+    generator: &mut impl Generator,
+    node: &Box<ASTnode>,
+    sym: &SymbolTableEntry,
+) {
+    generator.func_preamble(&sym.name);
+    generate_code_for_node(generator, node);
+    generator.func_postamble();
 }

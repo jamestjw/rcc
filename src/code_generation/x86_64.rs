@@ -1,4 +1,5 @@
 use super::*;
+use crate::parser::SymType;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -205,6 +206,9 @@ impl Generator for Generator_x86_64 {
 
     fn gen_glob_syms(&mut self, symtable: HashMap<String, Rc<SymbolTableEntry>>) {
         for (sym_name, entry) in symtable {
+            if entry.sym_type != SymType::VARIABLE {
+                continue;
+            }
             self.output_str.push_str(&format!(
                 r#"    .globl  {0}
     .bss
@@ -238,24 +242,32 @@ printint:
     leave
     ret
 "#;
-        let main_code = r#"
-    .globl  main
-    .type   main,   @function
-main:
-    pushq   %rbp
-    movq    %rsp, %rbp
-"#;
         self.output_str.push_str(printint_code);
-        self.output_str.push_str(main_code);
     }
 
-    fn postamble(&mut self) {
-        let code = r#"      
+    fn postamble(&mut self) {}
+
+    fn func_preamble(&mut self, fn_name: &str) {
+        self.output_str.push_str(&format!(
+            r#"
+    .globl  {0}
+    .type   {0},   @function
+{0}:
+    pushq   %rbp
+    movq    %rsp, %rbp
+"#,
+            fn_name
+        ));
+    }
+
+    fn func_postamble(&mut self) {
+        self.output_str.push_str(
+            &r#"      
     movl    $0, %eax
     popq    %rbp
     ret
-"#;
-        self.output_str.push_str(code);
+"#,
+        );
     }
 
     fn generate_output(&mut self, output_filename: &str) -> Result<(), Box<dyn Error>> {

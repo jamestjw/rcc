@@ -15,6 +15,7 @@ enum_str! {
         ASSIGN,
         NOOP,
         GLUE,
+        FUNCTION,
     }
 
 }

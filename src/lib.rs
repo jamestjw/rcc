@@ -51,7 +51,7 @@ pub fn compile(input_fname: &str, output_fname: &str) -> Result<(), String> {
         }
     };
 
-    let stmts = match parser.parse_statements() {
+    let stmts = match parser.parse_global_declarations() {
         Ok(stmt) => stmt,
         Err(err) => {
             return Err(format!(
