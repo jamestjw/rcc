@@ -301,4 +301,31 @@ printint:
         }
         self.output_str.push_str(&format!("\tjmp {}\n", label));
     }
+
+    // TODO: Do we need to copy return val to a register if no one intends
+    // use it? Especially in the case of void functions.
+    fn funccall(&mut self, fn_name: &str, r: Option<usize>) -> usize {
+        if let Some(r) = r {
+            self.gen_binary_op(
+                "movq",
+                Operand::Reg(self.reg_name(r)),
+                Operand::Reg("rdi".into()),
+            );
+        }
+
+        self.gen_unary_op("call", Operand::Func(format!("{}@PLT", fn_name)));
+
+        // If a register was passed in, reuse it. Otherwise we allocate a new one.
+        let out_reg = match r {
+            Some(r) => r,
+            None => self.alloc_register(),
+        };
+
+        self.gen_binary_op(
+            "movq",
+            Operand::Reg("rax".into()),
+            Operand::Reg(self.reg_name(out_reg)),
+        );
+        return out_reg;
+    }
 }

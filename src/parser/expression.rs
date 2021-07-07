@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use super::*;
+use std::error::Error;
 
 impl<'a> Parser<'a> {
     // Pratt parser inspired by https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
@@ -20,6 +21,35 @@ impl<'a> Parser<'a> {
                 // TODO: Check if we should expecting a None here
                 None => break,
             };
+
+            if let Some((l_bp, ())) = postfix_binding_power(op_tok_type) {
+                if l_bp < min_bp {
+                    break;
+                }
+
+                // Handle function calls
+                if op_tok_type == TokenType::LPAREN {
+                    if left.op != ASTop::IDENT {
+                        return Err(format!(
+                            "Function calls on '{}' are not allowed.",
+                            left.op.name()
+                        )
+                        .into());
+                    }
+                    // Safe to unwrap as ASTnodes with IDENT as op
+                    // always have references to a symtable entry
+                    let mut fn_node =
+                        self.parse_func_call(&Rc::clone(left.symtable_entry.as_ref().unwrap()))?;
+                    fn_node.left = Some(left);
+                    left = fn_node;
+                } else {
+                    self.consume()?;
+
+                    left = ASTnode::new_unary(token_type_to_postfix_op(op_tok_type), left);
+                }
+
+                continue;
+            }
 
             if let Some((l_bp, r_bp)) = infix_binding_power(op_tok_type) {
                 // We only proceed if the binding power is more then what the
@@ -60,6 +90,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::IDENT => {
                     let token = self.match_token(TokenType::IDENT)?;
+
+                    // TODO: Support reference of parameters
                     let symtable_entry = match self.global_symbol_table.get(&token.lexeme) {
                         Some(new_sym) => new_sym,
                         None => {
@@ -70,6 +102,7 @@ impl<'a> Parser<'a> {
                             .into())
                         }
                     };
+
                     let mut node = ASTnode::new_leaf(ASTop::IDENT, 0);
                     node.symtable_entry = Some(Rc::clone(symtable_entry));
 
@@ -93,6 +126,39 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
+    // TODO: Currently only support one parameter with no type checking
+    pub fn parse_func_call(
+        &mut self,
+        sym: &Rc<SymbolTableEntry>,
+    ) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        match sym.sym_type {
+            SymType::FUNCTION => {}
+            _ => {
+                return Err(format!("Call to {} which is not a function.", &sym.name).into());
+            }
+        };
+
+        self.match_token(TokenType::LPAREN)?;
+        let mut arg = None;
+
+        match self.current_token.as_ref().unwrap().token_type {
+            TokenType::RPAREN => {}
+            _ => {
+                // TODO: Here we are only accepting one argument
+                arg = Some(self.binary_expr(0)?);
+            }
+        };
+
+        self.match_token(TokenType::RPAREN)?;
+
+        let mut funccall_node = ASTnode::new_leaf(ASTop::FUNCCALL, 0);
+
+        // Reserve left node for function IDENT
+        funccall_node.right = arg;
+
+        Ok(funccall_node)
+    }
 }
 
 // How tightly this operator binds operands to its left and right
@@ -101,6 +167,15 @@ fn infix_binding_power(op: TokenType) -> Option<(u8, u8)> {
         TokenType::ASSIGN => (10, 5),
         TokenType::PLUS | TokenType::MINUS => (20, 30),
         TokenType::STAR | TokenType::SLASH => (40, 50),
+        _ => return None,
+    };
+    Some(res)
+}
+
+fn postfix_binding_power(op: TokenType) -> Option<(u8, ())> {
+    let res = match op {
+        // For function calls
+        TokenType::LPAREN => (100, ()),
         _ => return None,
     };
     Some(res)
@@ -115,6 +190,14 @@ fn token_type_to_binary_op(token_type: TokenType) -> ASTop {
         TokenType::ASSIGN => ASTop::ASSIGN,
         _ => {
             panic!("Unknown binary op from token type: {}", token_type);
+        }
+    }
+}
+
+fn token_type_to_postfix_op(token_type: TokenType) -> ASTop {
+    match token_type {
+        _ => {
+            panic!("Unknown postfix op from token type: {}", token_type);
         }
     }
 }
@@ -289,5 +372,93 @@ mod tests {
                 panic!("ASTnode does not contain reference to symtable entry.");
             }
         }
+    }
+
+    #[test]
+    fn parse_bin_expr_funccall_with_one_arg() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("fn_name(5 + 2)"));
+        let mut parser = Parser::new(&mut scanner)?;
+        let sym =
+            parser.add_global_symbol("fn_name".to_string(), DataType::INT, 0, SymType::FUNCTION);
+        let expr = parser.binary_expr(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::FUNCCALL,
+            ASTnode::new_leaf(ASTop::IDENT, 0),
+            ASTnode::new_boxed(
+                ASTop::ADD,
+                ASTnode::new_leaf(ASTop::INTLIT, 5),
+                ASTnode::new_leaf(ASTop::INTLIT, 2),
+            ),
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        // Ensure IDENT has sym to the function
+        assert!(Rc::ptr_eq(
+            &sym,
+            expr.left.as_ref().unwrap().symtable_entry.as_ref().unwrap()
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_bin_expr_funccall_with_no_arg() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("fn_name()"));
+        let mut parser = Parser::new(&mut scanner)?;
+        let sym =
+            parser.add_global_symbol("fn_name".to_string(), DataType::INT, 0, SymType::FUNCTION);
+        let expr = parser.binary_expr(0)?;
+
+        let expected = ASTnode::new_unary(ASTop::FUNCCALL, ASTnode::new_leaf(ASTop::IDENT, 0));
+
+        match_ast_node(Some(&expr), expected);
+
+        // Ensure IDENT has sym to the function
+        assert!(Rc::ptr_eq(
+            &sym,
+            expr.left.as_ref().unwrap().symtable_entry.as_ref().unwrap()
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_bin_expr_funccall_with_var_as_arg() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("fn_name(var_name)"));
+        let mut parser = Parser::new(&mut scanner)?;
+        let func_sym =
+            parser.add_global_symbol("fn_name".to_string(), DataType::INT, 0, SymType::FUNCTION);
+        let var_sym =
+            parser.add_global_symbol("var_name".to_string(), DataType::INT, 0, SymType::VARIABLE);
+        let expr = parser.binary_expr(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::FUNCCALL,
+            ASTnode::new_leaf(ASTop::IDENT, 0),
+            ASTnode::new_leaf(ASTop::IDENT, 0),
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        // Ensure left node has sym to the function
+        assert!(Rc::ptr_eq(
+            &func_sym,
+            expr.left.as_ref().unwrap().symtable_entry.as_ref().unwrap()
+        ));
+
+        // Ensure right node has sym to the argument
+        assert!(Rc::ptr_eq(
+            &var_sym,
+            expr.right
+                .as_ref()
+                .unwrap()
+                .symtable_entry
+                .as_ref()
+                .unwrap()
+        ));
+
+        Ok(())
     }
 }

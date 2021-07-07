@@ -62,6 +62,8 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         }
     };
 
+    // crate::debug::print_tree(&stmts, 0);
+
     let mut generator = code_generation::x86_64::Generator_x86_64::new();
     generator.gen_glob_syms(parser.global_symbol_table);
     generator.preamble();

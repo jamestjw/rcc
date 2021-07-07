@@ -23,6 +23,7 @@ enum_str! {
         GLUE,
         FUNCTION,
         RETURN,
+        FUNCCALL,
     }
 
 }

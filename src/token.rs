@@ -25,6 +25,7 @@ enum_str! {
         INT,
         SEMI,
         RETURN,
+        BANG,
     }
 }
 
@@ -47,6 +48,7 @@ impl fmt::Display for TokenType {
             TokenType::INT => write!(f, "int"),
             TokenType::SEMI => write!(f, ";"),
             TokenType::RETURN => write!(f, "return"),
+            TokenType::BANG => write!(f, "!"),
         }
     }
 }

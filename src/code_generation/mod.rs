@@ -51,6 +51,7 @@ pub trait Generator {
     fn func_preamble(&mut self, fn_name: &str);
     fn func_postamble(&mut self, end_label: &str);
     fn return_from_func(&mut self, label: &str, r: Option<usize>);
+    fn funccall(&mut self, fn_name: &str, r1: Option<usize>) -> usize;
     fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
 }
 
@@ -63,11 +64,10 @@ pub fn generate_code_for_node(
 ) -> Option<usize> {
     // Special cases
     if node.op == ASTop::FUNCTION {
-        let fn_node = node.left.as_ref()?;
-        let sym = node.symtable_entry.as_ref()?;
-
-        generate_code_for_function(generator, fn_node, sym);
+        generate_code_for_function(generator, node);
         return None;
+    } else if node.op == ASTop::FUNCCALL {
+        return Some(generate_code_for_funccall(generator, node));
     }
 
     let mut left_reg: Option<usize> = None;
@@ -112,28 +112,55 @@ pub fn generate_code_for_node(
             let sym = node.left.as_ref()?.symtable_entry.as_ref()?;
             Some(generator.assign_glob_var(sym, right_reg?))
         }
-        ASTop::FUNCTION => {
-            let sym = node.left.as_ref()?.symtable_entry.as_ref()?;
-            Some(generator.assign_glob_var(sym, right_reg?))
-        }
         ASTop::RETURN => {
             generator.return_from_func(node.label.as_ref()?, left_reg);
             None
         }
         ASTop::NOOP | ASTop::GLUE => None,
+        _ => {
+            panic!(
+                "Unknown ASTop:{} encountered during code generation",
+                node.op.name()
+            );
+        }
     }
 }
 
+// fn_node should be an ASTnode with ASTop::FUNCTION
 pub fn generate_code_for_function(
     generator: &mut impl Generator,
-    node: &Box<ASTnode>,
-    sym: &SymbolTableEntry,
+    fn_node: &Box<ASTnode>,
 ) {
+    // This is safe as the left node and symtable_entry should always be present
+    // if the operation is ASTop::FUNCTION.
+    let fn_body_node = fn_node.left.as_ref().unwrap();
+    let sym = fn_node.symtable_entry.as_ref().unwrap();
+
     generator.func_preamble(&sym.name);
-    generate_code_for_node(generator, node);
+    generate_code_for_node(generator, fn_body_node);
     generator.func_postamble(&generate_label_for_function(sym));
 }
 
 pub fn generate_label_for_function(sym: &SymbolTableEntry) -> String {
     format!("L_{}_end", sym.name)
+}
+
+// fn_node should be an ASTnode with ASTop::FUNCCALL
+fn generate_code_for_funccall(generator: &mut impl Generator, fn_node: &Box<ASTnode>) -> usize {
+    // This is safe as the left node should always be present along with its symbol
+    // if the operation is ASTop::FUNCCALL.
+    let fn_sym = fn_node
+        .left
+        .as_ref()
+        .unwrap()
+        .symtable_entry
+        .as_ref()
+        .unwrap();
+    let param_node = fn_node.right.as_ref();
+    let param_reg = match param_node {
+        Some(param_node) => generate_code_for_node(generator, param_node),
+        None => None,
+    };
+
+    return generator.funccall(&fn_sym.name, param_reg);
 }
