@@ -9,6 +9,7 @@ use crate::parser::{ASTnode, ASTop};
 
 use std::collections::HashMap;
 use std::error::Error;
+use std::path::Path;
 use std::rc::Rc;
 
 pub mod x86_64;
@@ -50,7 +51,7 @@ pub trait Generator {
     fn func_preamble(&mut self, fn_name: &str);
     fn func_postamble(&mut self, end_label: &str);
     fn return_from_func(&mut self, label: &str, r: Option<usize>);
-    fn generate_output(&mut self, output_filename: &str) -> Result<(), Box<dyn Error>>;
+    fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
 }
 
 // Generates the code for the ASTnode,

@@ -6,6 +6,7 @@
 
 use std::error::Error;
 use std::fs;
+use std::path::Path;
 
 use crate::token::{Token, TokenType};
 
@@ -21,9 +22,9 @@ impl Scanner {
     // TODO: Currently the scanner loads the entire input file, perhaps
     // it is possible to incremental read parts of the file into a buffer instead
     // Idea: Load entire line so that we can even illustrate where errors are found
-    pub fn new(input_fname: &str) -> Result<Scanner, Box<dyn Error>> {
+    pub fn new(input_fname: &Path) -> Result<Scanner, Box<dyn Error>> {
         let file_contents = fs::read_to_string(input_fname)
-            .map_err(|e| format!("Error reading file {}: {}", input_fname, e))?;
+            .map_err(|e| format!("Error reading file {}: {}", input_fname.display(), e))?;
 
         Ok(Scanner::new_from_string(file_contents))
     }

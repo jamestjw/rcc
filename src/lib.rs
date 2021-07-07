@@ -10,9 +10,9 @@ pub mod parser;
 pub mod scanner;
 pub mod token;
 
-use std::process::Command;
-
 use code_generation::Generator;
+use std::path::Path;
+use std::process::Command;
 
 #[macro_export]
 macro_rules! enum_str {
@@ -35,7 +35,7 @@ macro_rules! enum_str {
     };
 }
 
-pub fn compile(input_fname: &str, output_fname: &str) -> Result<(), String> {
+pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
     let mut scanner = match scanner::Scanner::new(input_fname) {
         Ok(scanner) => scanner,
         Err(err) => {
@@ -55,7 +55,9 @@ pub fn compile(input_fname: &str, output_fname: &str) -> Result<(), String> {
         Err(err) => {
             return Err(format!(
                 "Error on line {} in {}:\n{}",
-                scanner.line_number, input_fname, err
+                scanner.line_number,
+                input_fname.display(),
+                err
             ));
         }
     };
@@ -72,7 +74,7 @@ pub fn compile(input_fname: &str, output_fname: &str) -> Result<(), String> {
 }
 
 // TODO: Support multiple input files
-pub fn assemble_and_link(input_fname: &str, output_fname: &str) {
+pub fn assemble_and_link(input_fname: &Path, output_fname: &Path) {
     let mut assemble = Command::new("cc");
     assemble.arg("-o").arg(output_fname).arg(input_fname);
     assemble

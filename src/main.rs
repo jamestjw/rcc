@@ -7,6 +7,7 @@
 extern crate exitcode;
 
 use rcc::compile;
+use std::path::PathBuf;
 use std::process;
 
 use structopt::StructOpt;
@@ -18,19 +19,22 @@ use structopt::StructOpt;
 )]
 struct Opt {
     #[structopt(short, long, help = "Output file path", default_value = "./out.s")]
-    outfile: String,
+    outfile: PathBuf,
     #[structopt(
         required = true,
         help = "List of input files to compile (it currently only supports one input file)"
     )]
-    infiles: Vec<String>,
+    infiles: Vec<PathBuf>,
 }
 
 fn main() {
     let opt = Opt::from_args();
 
+    let infile = &opt.infiles[0];
+    let outfile = &opt.outfile;
+
     // TODO: Support more than one input file
-    match compile(&opt.infiles[0], &opt.outfile) {
+    match compile(infile, outfile) {
         Ok(_) => {}
         Err(e) => {
             eprintln!("{}", e);

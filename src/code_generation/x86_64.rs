@@ -1,9 +1,16 @@
+// Copyright (c) 2021, James Tan Juan Whei
+// All rights reserved.
+
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
+
 use super::*;
 use crate::parser::SymType;
 use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 
 enum Operand {
     Int(i32),
@@ -270,7 +277,7 @@ printint:
         ));
     }
 
-    fn generate_output(&mut self, output_filename: &str) -> Result<(), Box<dyn Error>> {
+    fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>> {
         self.postamble();
 
         let mut f = fs::OpenOptions::new()
