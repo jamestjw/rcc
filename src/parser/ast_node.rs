@@ -33,7 +33,7 @@ pub struct ASTnode {
     pub left: Option<Box<ASTnode>>,
     pub right: Option<Box<ASTnode>>,
     pub int_value: i32,
-    pub symtable_entry: Option<Rc<SymbolTableEntry>>,
+    pub symtable_entry: Option<Rc<RefCell<SymbolTableEntry>>>,
     pub rvalue: bool,
     pub label: Option<String>,
 }

@@ -14,14 +14,16 @@ mod symbol_table;
 use crate::scanner::Scanner;
 use crate::token::{Token, TokenType};
 pub use ast_node::*;
+use std::cell::RefCell;
 use std::rc::Rc;
+
 pub use symbol_table::*;
 
 pub struct Parser<'a> {
     token_generator: &'a mut Scanner,
     current_token: Option<Token>,
-    pub global_symbol_table: HashMap<String, Rc<SymbolTableEntry>>,
-    pub current_func_sym: Option<Rc<SymbolTableEntry>>, // Current function that we are parsing
+    pub global_symbol_table: HashMap<String, Rc<RefCell<SymbolTableEntry>>>,
+    pub current_func_sym: Option<Rc<RefCell<SymbolTableEntry>>>, // Current function that we are parsing
 }
 
 impl<'a> Parser<'a> {
@@ -47,8 +49,8 @@ impl<'a> Parser<'a> {
         Ok(current_token_clone.unwrap())
     }
 
+    // Consume the current if it matches the given type, else returns an error
     fn match_token(&mut self, token_type: TokenType) -> Result<Token, Box<dyn Error>> {
-        // TODO: Implement display trait for TokenType
         match &self.current_token {
             Some(tok) => {
                 if tok.token_type == token_type {
@@ -71,20 +73,30 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn is_token_type(&mut self, token_type: TokenType) -> Result<bool, String> {
+        match &self.current_token {
+            Some(tok) => Ok(tok.token_type == token_type),
+            None => Err("Unexpected end of input.".into()),
+        }
+    }
+
     pub fn add_global_symbol(
         &mut self,
         lexeme: String,
         data_type: DataType,
         initial_value: i32,
         sym_type: SymType,
-    ) -> Rc<SymbolTableEntry> {
-        let sym = Rc::new(SymbolTableEntry {
+        size: u8,
+    ) -> Rc<RefCell<SymbolTableEntry>> {
+        // TODO: Is there a reasonable way to avoid cloning the lexeme?
+        let sym = Rc::new(RefCell::new(SymbolTableEntry::new(
             data_type,
             initial_value,
-            name: lexeme.clone(),
-            size: 4,
+            lexeme.clone(),
+            size,
             sym_type,
-        });
+            SymClass::GLOBAL,
+        )));
         self.global_symbol_table.insert(lexeme, Rc::clone(&sym));
         sym
     }

@@ -5,27 +5,30 @@
 // LICENSE file in the root directory of this source tree.
 
 use super::*;
-use crate::parser::SymType;
+use crate::parser::{SymPosition, SymType};
 use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+// Registers to assign params to
+const PARAM_REGS: [&'static str; 6] = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
+
 enum Operand {
     Int(i32),
     Reg(String),
     Func(String),
-    IPOffset(String),
+    RawString(String),
 }
 
 impl fmt::Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Operand::Int(i) => write!(f, "${}", i),
-            Operand::Reg(str) => write!(f, "%{}", str),
-            Operand::Func(str) => write!(f, "{}", str),
-            Operand::IPOffset(str) => write!(f, "{}(%rip)", str),
+            Operand::Reg(s) => write!(f, "%{}", s),
+            Operand::Func(s) => write!(f, "{}@PLT", s),
+            Operand::RawString(s) => write!(f, "{}", s),
         }
     }
 }
@@ -176,21 +179,25 @@ impl Generator for Generator_x86_64 {
             Operand::Reg(self.reg_name(r1)),
             Operand::Reg("rdi".into()),
         );
-        self.gen_unary_op("call", Operand::Func("printint@PLT".into()));
+        self.gen_unary_op("call", Operand::Func("printint".into()));
         self.free_register(r1);
     }
 
     fn load_glob_var(&mut self, sym: &SymbolTableEntry) -> usize {
         let r = self.alloc_register();
-        let op_name = match sym.size {
-            1 => "movzbq",
-            4 => "movslq",
-            8 => "movq",
-            _ => panic!("Invalid size in assign_glob_var."),
-        };
+        // TODO: Investigate how relevant it is to use the right
+        // instruction here. For now this doesn't work since we
+        // don't know the size of the first operand
+        // let op_name = match sym.size {
+        //     1 => "movzbq",
+        //     4 => "movslq",
+        //     8 => "movq",
+        //     _ => panic!("Invalid size in assign_glob_var."),
+        // };
+        let op_name = "movq";
         self.gen_binary_op(
             op_name,
-            Operand::IPOffset(sym.name.to_string()),
+            Operand::RawString(sym_posn_to_string(&sym.posn)),
             Operand::Reg(self.reg_name(r)),
         );
         r
@@ -206,14 +213,14 @@ impl Generator for Generator_x86_64 {
         self.gen_binary_op(
             op_name,
             Operand::Reg(self.reg_name_for_size(r, sym.size)),
-            Operand::IPOffset(sym.name.to_string()),
+            Operand::RawString(sym_posn_to_string(&sym.posn)),
         );
         r
     }
 
-    fn gen_glob_syms(&mut self, symtable: HashMap<String, Rc<SymbolTableEntry>>) {
+    fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
         for (sym_name, entry) in symtable {
-            if entry.sym_type != SymType::VARIABLE {
+            if entry.borrow().sym_type != SymType::VARIABLE {
                 continue;
             }
             self.output_str.push_str(&format!(
@@ -225,7 +232,8 @@ impl Generator for Generator_x86_64 {
 {0}:
     .zero   {1}
 "#,
-                sym_name, entry.size
+                sym_name,
+                entry.borrow().size
             ));
         }
     }
@@ -313,7 +321,7 @@ printint:
             );
         }
 
-        self.gen_unary_op("call", Operand::Func(format!("{}@PLT", fn_name)));
+        self.gen_unary_op("call", Operand::Func(fn_name.to_string()));
 
         // If a register was passed in, reuse it. Otherwise we allocate a new one.
         let out_reg = match r {
@@ -327,5 +335,65 @@ printint:
             Operand::Reg(self.reg_name(out_reg)),
         );
         return out_reg;
+    }
+
+    fn set_sym_positions(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
+        for (sym_name, entry) in symtable {
+            let mut entry = entry.borrow_mut();
+            match entry.sym_type {
+                SymType::VARIABLE => {
+                    // Global variables can be referred directly to by their names
+                    entry.posn = SymPosition::Label(sym_name.clone());
+                }
+                SymType::FUNCTION => {
+                    // Functions can be referred directly to by their names
+                    entry.posn = SymPosition::Label(sym_name.clone());
+
+                    // Assign function params to registers or stack offsets
+                    let mut member_node = match &entry.members {
+                        Some(n) => Some(Rc::clone(n)),
+                        None => None,
+                    };
+                    let mut i = 0;
+                    // Offset of next param on the stack (16 because of pushed rbp and the retaddr)
+                    let mut param_offset = 16;
+
+                    loop {
+                        match member_node {
+                            Some(node) => {
+                                if i < PARAM_REGS.len() {
+                                    node.borrow_mut().posn =
+                                        SymPosition::Reg(PARAM_REGS[i].to_string());
+                                } else {
+                                    node.borrow_mut().posn = SymPosition::BPOffset(param_offset);
+                                    param_offset += 8;
+                                }
+                                i += 1;
+                                if node.borrow().next.is_some() {
+                                    member_node =
+                                        Some(Rc::clone(node.borrow().next.as_ref().unwrap()));
+                                } else {
+                                    member_node = None;
+                                }
+                            }
+                            None => {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn sym_posn_to_string(posn: &SymPosition) -> String {
+    match posn {
+        SymPosition::Reg(s) => format!("%{}", s),
+        SymPosition::BPOffset(i) => format!("{}(%rbp)", i),
+        SymPosition::Label(s) => format!("{}(%rip)", s),
+        SymPosition::TBD => {
+            panic!("Position of symbol undetermined.");
+        }
     }
 }

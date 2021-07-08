@@ -1,0 +1,2 @@
+Error on line 8 in tests/input/input009-err.c:
+Syntax error, expected ')' token but ',' was found instead.

@@ -11,7 +11,7 @@ max_idx=0
 for i in $(ls $TEST_DIR | grep 'input[0-9]\+-\(err\|ok\).c')
 do
     [[ $i =~ $regex ]]
-    curr_idx=${BASH_REMATCH[1]}
+    curr_idx=10#${BASH_REMATCH[1]}
 
     if [[ $curr_idx -gt $max_idx ]]
     then

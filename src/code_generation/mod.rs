@@ -7,6 +7,7 @@
 use crate::parser::SymbolTableEntry;
 use crate::parser::{ASTnode, ASTop};
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
@@ -45,7 +46,7 @@ pub trait Generator {
     fn print(&mut self, r1: usize);
     fn load_glob_var(&mut self, sym: &SymbolTableEntry) -> usize;
     fn assign_glob_var(&mut self, sym: &SymbolTableEntry, r: usize) -> usize;
-    fn gen_glob_syms(&mut self, symtable: HashMap<String, Rc<SymbolTableEntry>>);
+    fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
     fn preamble(&mut self);
     fn postamble(&mut self);
     fn func_preamble(&mut self, fn_name: &str);
@@ -53,6 +54,7 @@ pub trait Generator {
     fn return_from_func(&mut self, label: &str, r: Option<usize>);
     fn funccall(&mut self, fn_name: &str, r1: Option<usize>) -> usize;
     fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
+    fn set_sym_positions(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
 }
 
 // Generates the code for the ASTnode,
@@ -100,8 +102,8 @@ pub fn generate_code_for_node(
         }
         ASTop::IDENT => {
             if node.rvalue {
-                let sym = node.symtable_entry.as_ref()?;
-                Some(generator.load_glob_var(sym))
+                let sym = node.symtable_entry.as_ref().unwrap().borrow();
+                Some(generator.load_glob_var(&sym))
             } else {
                 // In cases where an IDENT is not used as a left-value,
                 // the parent node will take care of what needs to be done.
@@ -109,8 +111,15 @@ pub fn generate_code_for_node(
             }
         }
         ASTop::ASSIGN => {
-            let sym = node.left.as_ref()?.symtable_entry.as_ref()?;
-            Some(generator.assign_glob_var(sym, right_reg?))
+            let sym = node
+                .left
+                .as_ref()
+                .unwrap()
+                .symtable_entry
+                .as_ref()
+                .unwrap()
+                .borrow();
+            Some(generator.assign_glob_var(&sym, right_reg?))
         }
         ASTop::RETURN => {
             generator.return_from_func(node.label.as_ref()?, left_reg);
@@ -127,18 +136,15 @@ pub fn generate_code_for_node(
 }
 
 // fn_node should be an ASTnode with ASTop::FUNCTION
-pub fn generate_code_for_function(
-    generator: &mut impl Generator,
-    fn_node: &Box<ASTnode>,
-) {
+pub fn generate_code_for_function(generator: &mut impl Generator, fn_node: &Box<ASTnode>) {
     // This is safe as the left node and symtable_entry should always be present
     // if the operation is ASTop::FUNCTION.
     let fn_body_node = fn_node.left.as_ref().unwrap();
-    let sym = fn_node.symtable_entry.as_ref().unwrap();
+    let sym = fn_node.symtable_entry.as_ref().unwrap().borrow();
 
     generator.func_preamble(&sym.name);
     generate_code_for_node(generator, fn_body_node);
-    generator.func_postamble(&generate_label_for_function(sym));
+    generator.func_postamble(&generate_label_for_function(&sym));
 }
 
 pub fn generate_label_for_function(sym: &SymbolTableEntry) -> String {
@@ -155,7 +161,8 @@ fn generate_code_for_funccall(generator: &mut impl Generator, fn_node: &Box<ASTn
         .unwrap()
         .symtable_entry
         .as_ref()
-        .unwrap();
+        .unwrap()
+        .borrow();
     let param_node = fn_node.right.as_ref();
     let param_reg = match param_node {
         Some(param_node) => generate_code_for_node(generator, param_node),

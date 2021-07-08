@@ -16,12 +16,12 @@ pub fn print_tree(node: &ASTnode, indentation_count: u8) {
         ASTop::IDENT => {
             println!(
                 ": {} rvalue:{}",
-                node.symtable_entry.as_ref().unwrap().name,
+                node.symtable_entry.as_ref().unwrap().borrow().name,
                 node.rvalue
             );
         }
         ASTop::FUNCTION => {
-            println!(": {}", node.symtable_entry.as_ref().unwrap().name,);
+            println!(": {}", node.symtable_entry.as_ref().unwrap().borrow().name,);
         }
         _ => {
             println!("");

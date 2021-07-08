@@ -26,6 +26,7 @@ enum_str! {
         SEMI,
         RETURN,
         BANG,
+        COMMA,
     }
 }
 
@@ -49,6 +50,7 @@ impl fmt::Display for TokenType {
             TokenType::SEMI => write!(f, ";"),
             TokenType::RETURN => write!(f, "return"),
             TokenType::BANG => write!(f, "!"),
+            TokenType::COMMA => write!(f, ","),
         }
     }
 }
@@ -56,6 +58,8 @@ impl fmt::Display for TokenType {
 pub struct Token {
     pub token_type: TokenType,
     pub int_value: i32,
+    // TODO: Investigate the feasibility of simply creating references to the
+    // source program using Rc Strings.
     pub lexeme: String,
 }
 

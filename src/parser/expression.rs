@@ -39,7 +39,7 @@ impl<'a> Parser<'a> {
                     // Safe to unwrap as ASTnodes with IDENT as op
                     // always have references to a symtable entry
                     let mut fn_node =
-                        self.parse_func_call(&Rc::clone(left.symtable_entry.as_ref().unwrap()))?;
+                        self.parse_func_call(&left.symtable_entry.as_ref().unwrap().borrow())?;
                     fn_node.left = Some(left);
                     left = fn_node;
                 } else {
@@ -91,20 +91,26 @@ impl<'a> Parser<'a> {
                 TokenType::IDENT => {
                     let token = self.match_token(TokenType::IDENT)?;
 
-                    // TODO: Support reference of parameters
-                    let symtable_entry = match self.global_symbol_table.get(&token.lexeme) {
-                        Some(new_sym) => new_sym,
-                        None => {
-                            return Err(format!(
-                                "Referencing undefined variable {}.",
-                                &token.lexeme
-                            )
-                            .into())
-                        }
+                    let mut symtable_entry = match &self.current_func_sym {
+                        Some(n) => n.borrow().search_member(&token.lexeme),
+                        None => None,
                     };
 
+                    if symtable_entry.is_none() {
+                        symtable_entry = match self.global_symbol_table.get(&token.lexeme) {
+                            Some(new_sym) => Some(Rc::clone(new_sym)),
+                            None => {
+                                return Err(format!(
+                                    "Referencing undefined variable {}.",
+                                    &token.lexeme
+                                )
+                                .into())
+                            }
+                        };
+                    }
+
                     let mut node = ASTnode::new_leaf(ASTop::IDENT, 0);
-                    node.symtable_entry = Some(Rc::clone(symtable_entry));
+                    node.symtable_entry = Some(Rc::clone(symtable_entry.as_ref().unwrap()));
 
                     Ok(node)
                 }
@@ -130,7 +136,8 @@ impl<'a> Parser<'a> {
     // TODO: Currently only support one parameter with no type checking
     pub fn parse_func_call(
         &mut self,
-        sym: &Rc<SymbolTableEntry>,
+        sym: &SymbolTableEntry,
+        // sym: &Rc<SymbolTableEntry>,
     ) -> Result<Box<ASTnode>, Box<dyn Error>> {
         match sym.sym_type {
             SymType::FUNCTION => {}
@@ -353,7 +360,7 @@ mod tests {
     fn parse_simple_assignment() {
         let mut scanner = Scanner::new_from_string(String::from("x = 5;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE);
+        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE, 4);
         let expr = parser.binary_expr(0).unwrap();
 
         let expected = ASTnode::new_boxed(
@@ -378,8 +385,13 @@ mod tests {
     fn parse_bin_expr_funccall_with_one_arg() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name(5 + 2)"));
         let mut parser = Parser::new(&mut scanner)?;
-        let sym =
-            parser.add_global_symbol("fn_name".to_string(), DataType::INT, 0, SymType::FUNCTION);
+        let sym = parser.add_global_symbol(
+            "fn_name".to_string(),
+            DataType::INT,
+            0,
+            SymType::FUNCTION,
+            4,
+        );
         let expr = parser.binary_expr(0)?;
 
         let expected = ASTnode::new_boxed(
@@ -407,8 +419,13 @@ mod tests {
     fn parse_bin_expr_funccall_with_no_arg() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name()"));
         let mut parser = Parser::new(&mut scanner)?;
-        let sym =
-            parser.add_global_symbol("fn_name".to_string(), DataType::INT, 0, SymType::FUNCTION);
+        let sym = parser.add_global_symbol(
+            "fn_name".to_string(),
+            DataType::INT,
+            0,
+            SymType::FUNCTION,
+            4,
+        );
         let expr = parser.binary_expr(0)?;
 
         let expected = ASTnode::new_unary(ASTop::FUNCCALL, ASTnode::new_leaf(ASTop::IDENT, 0));
@@ -428,10 +445,20 @@ mod tests {
     fn parse_bin_expr_funccall_with_var_as_arg() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name(var_name)"));
         let mut parser = Parser::new(&mut scanner)?;
-        let func_sym =
-            parser.add_global_symbol("fn_name".to_string(), DataType::INT, 0, SymType::FUNCTION);
-        let var_sym =
-            parser.add_global_symbol("var_name".to_string(), DataType::INT, 0, SymType::VARIABLE);
+        let func_sym = parser.add_global_symbol(
+            "fn_name".to_string(),
+            DataType::INT,
+            0,
+            SymType::FUNCTION,
+            0,
+        );
+        let var_sym = parser.add_global_symbol(
+            "var_name".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            4,
+        );
         let expr = parser.binary_expr(0)?;
 
         let expected = ASTnode::new_boxed(
