@@ -41,7 +41,7 @@ impl<'a> Parser<'a> {
                 TokenType::PRINT => self.print_statement()?,
                 TokenType::RETURN => self.parse_return()?,
                 _ => {
-                    let node = self.binary_expr(0)?;
+                    let node = self.expr_by_precedence(0)?;
                     self.match_token(TokenType::SEMI)?;
                     node
                 }
@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
             return Err(format!("Cannot return from outside a function.").into());
         }
         self.match_token(TokenType::RETURN)?;
-        let binary_node = self.binary_expr(0)?;
+        let binary_node = self.expr_by_precedence(0)?;
         self.match_token(TokenType::SEMI)?;
 
         // TODO: Ensure that returning values is not allowed in void
@@ -242,7 +242,7 @@ impl<'a> Parser<'a> {
     pub fn print_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
         self.match_token(TokenType::PRINT)?;
         self.match_token(TokenType::LPAREN)?;
-        let binary_node = self.binary_expr(0)?;
+        let binary_node = self.expr_by_precedence(0)?;
         self.match_token(TokenType::RPAREN)?;
         self.match_token(TokenType::SEMI)?;
 

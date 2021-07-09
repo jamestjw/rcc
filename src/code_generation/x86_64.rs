@@ -312,29 +312,23 @@ printint:
 
     // TODO: Do we need to copy return val to a register if no one intends
     // use it? Especially in the case of void functions.
-    fn funccall(&mut self, fn_name: &str, r: Option<usize>) -> usize {
-        if let Some(r) = r {
-            self.gen_binary_op(
-                "movq",
-                Operand::Reg(self.reg_name(r)),
-                Operand::Reg("rdi".into()),
-            );
-        }
+    fn funccall(&mut self, fn_name: &str, num_params: usize) -> usize {
+        let r = self.alloc_register();
 
         self.gen_unary_op("call", Operand::Func(fn_name.to_string()));
 
-        // If a register was passed in, reuse it. Otherwise we allocate a new one.
-        let out_reg = match r {
-            Some(r) => r,
-            None => self.alloc_register(),
-        };
-
+        if num_params > PARAM_REGS.len() {
+            for _ in 0..(num_params - PARAM_REGS.len()) {
+                // Temporarily use this register to pop out args
+                self.gen_unary_op("popq", Operand::Reg(self.reg_name(r)));
+            }
+        }
         self.gen_binary_op(
             "movq",
             Operand::Reg("rax".into()),
-            Operand::Reg(self.reg_name(out_reg)),
+            Operand::Reg(self.reg_name(r)),
         );
-        return out_reg;
+        return r;
     }
 
     fn set_sym_positions(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
@@ -365,7 +359,8 @@ printint:
                                     node.borrow_mut().posn =
                                         SymPosition::Reg(PARAM_REGS[i].to_string());
                                 } else {
-                                    node.borrow_mut().posn = SymPosition::BPOffset(param_offset);
+                                    node.borrow_mut().posn =
+                                        SymPosition::PositiveBPOffset(param_offset);
                                     param_offset += 8;
                                 }
                                 i += 1;
@@ -385,12 +380,28 @@ printint:
             }
         }
     }
+
+    // TODO: The behaviour of this method is only coherent if we invoke this
+    // before function calls. Perhaps the name of the method should be changed.
+    fn move_to_position(&mut self, r: usize, posn: &SymPosition) {
+        if let SymPosition::PositiveBPOffset(_) = posn {
+            self.gen_unary_op("pushq", Operand::Reg(self.reg_name(r)));
+        } else {
+            self.gen_binary_op(
+                "movq",
+                Operand::Reg(self.reg_name(r)),
+                Operand::RawString(sym_posn_to_string(posn)),
+            );
+        }
+
+        self.free_register(r);
+    }
 }
 
 fn sym_posn_to_string(posn: &SymPosition) -> String {
     match posn {
         SymPosition::Reg(s) => format!("%{}", s),
-        SymPosition::BPOffset(i) => format!("{}(%rbp)", i),
+        SymPosition::PositiveBPOffset(i) => format!("{}(%rbp)", i),
         SymPosition::Label(s) => format!("{}(%rip)", s),
         SymPosition::TBD => {
             panic!("Position of symbol undetermined.");

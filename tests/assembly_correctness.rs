@@ -47,6 +47,8 @@ fn generate_correct_assembly() {
                 match compile(&test_file, &output_asm_path) {
                     Ok(_) => {
                         if status == "err" {
+                            fs::remove_file(output_asm_path.as_path())
+                                .expect("Failed to remove file.");
                             panic!("Compilation should have failed for {}", test_file_name);
                         }
                         assemble_and_link(&output_asm_path, &exec_path);

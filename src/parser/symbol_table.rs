@@ -47,7 +47,7 @@ pub enum SymPosition {
     Reg(String),
     // If a symbol can be expected to be found at some offset from the base pointer,
     // e.g. func params and local vars
-    BPOffset(i8),
+    PositiveBPOffset(i8),
     // If a symbol can be expected to be found at some label, e.g. global vars
     Label(String),
     // When position of a symbol is not yet determined

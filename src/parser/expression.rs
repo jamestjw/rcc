@@ -9,7 +9,7 @@ use std::error::Error;
 
 impl<'a> Parser<'a> {
     // Pratt parser inspired by https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
-    pub fn binary_expr(&mut self, min_bp: u8) -> Result<Box<ASTnode>, Box<dyn Error>> {
+    pub fn expr_by_precedence(&mut self, min_bp: u8) -> Result<Box<ASTnode>, Box<dyn Error>> {
         let mut left = self.primary_expr()?;
 
         loop {
@@ -60,7 +60,7 @@ impl<'a> Parser<'a> {
 
                 self.consume()?;
 
-                let mut right = self.binary_expr(r_bp)?;
+                let mut right = self.expr_by_precedence(r_bp)?;
 
                 if op_tok_type == TokenType::ASSIGN {
                     right.rvalue = true;
@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
             Some(tok) => match tok.token_type {
                 TokenType::LPAREN => {
                     self.consume()?;
-                    let expr = self.binary_expr(0)?;
+                    let expr = self.expr_by_precedence(0)?;
                     self.match_token(TokenType::RPAREN)?;
                     Ok(expr)
                 }
@@ -148,14 +148,53 @@ impl<'a> Parser<'a> {
 
         self.match_token(TokenType::LPAREN)?;
         let mut arg = None;
-
-        match self.current_token.as_ref().unwrap().token_type {
-            TokenType::RPAREN => {}
-            _ => {
-                // TODO: Here we are only accepting one argument
-                arg = Some(self.binary_expr(0)?);
-            }
+        let mut member_node = match &sym.members {
+            Some(mem) => Some(Rc::clone(mem)),
+            None => None,
         };
+
+        loop {
+            match self.current_token.as_ref().unwrap().token_type {
+                // Loop until we hit RPAREN
+                TokenType::RPAREN => {
+                    break;
+                }
+                _ => {
+                    // If we do not hit a RPAREN, and member_node does not exist,
+                    // it means that we have been given too many arguments
+                    let param_node = match member_node {
+                        None => {
+                            return Err("Function does not accept this many arguments.".into());
+                        }
+                        Some(ref n) => Rc::clone(n),
+                    };
+                    // TODO: Here we are only accepting one argument
+                    if arg.is_none() {
+                        let mut new_node =
+                            ASTnode::new_right_unary(ASTop::FUNCPARAM, self.expr_by_precedence(0)?);
+                        new_node.symtable_entry = Some(Rc::clone(&param_node));
+                        arg = Some(new_node);
+                    } else {
+                        let mut new_node = ASTnode::new_boxed(
+                            ASTop::FUNCPARAM,
+                            arg.unwrap(),
+                            self.expr_by_precedence(0)?,
+                        );
+                        new_node.symtable_entry = Some(Rc::clone(&param_node));
+                        arg = Some(new_node);
+                    }
+
+                    member_node = match param_node.borrow().next {
+                        None => None,
+                        Some(ref next) => Some(Rc::clone(next)),
+                    };
+
+                    if self.is_token_type(TokenType::COMMA)? {
+                        self.consume()?;
+                    }
+                }
+            };
+        }
 
         self.match_token(TokenType::RPAREN)?;
 
@@ -217,7 +256,7 @@ mod tests {
     fn parse_simple_addition() {
         let mut scanner = Scanner::new_from_string(String::from("51+24;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let expr = parser.binary_expr(0).unwrap();
+        let expr = parser.expr_by_precedence(0).unwrap();
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
             ASTnode::new_leaf(ASTop::INTLIT, 51),
@@ -231,7 +270,7 @@ mod tests {
     fn parse_simple_addition_with_parentheses() {
         let mut scanner = Scanner::new_from_string(String::from("(51+24);"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let expr = parser.binary_expr(0).unwrap();
+        let expr = parser.expr_by_precedence(0).unwrap();
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
             ASTnode::new_leaf(ASTop::INTLIT, 51),
@@ -245,7 +284,7 @@ mod tests {
     fn parse_simple_addition_missing_parenthesis() {
         let mut scanner = Scanner::new_from_string(String::from("(51+24;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        match parser.binary_expr(0) {
+        match parser.expr_by_precedence(0) {
             Ok(_) => {
                 panic!("Expected missing parenthesis error");
             }
@@ -262,7 +301,7 @@ mod tests {
     fn parse_simple_addition_missing_left_operand() {
         let mut scanner = Scanner::new_from_string(String::from("+ 51;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        match parser.binary_expr(0) {
+        match parser.expr_by_precedence(0) {
             Ok(_) => {
                 panic!("Expected missing left operand error");
             }
@@ -278,7 +317,7 @@ mod tests {
     fn parse_simple_addition_missing_right_operand() {
         let mut scanner = Scanner::new_from_string(String::from("51+;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        match parser.binary_expr(0) {
+        match parser.expr_by_precedence(0) {
             Ok(_) => {
                 panic!("Expected missing right operand error");
             }
@@ -295,7 +334,7 @@ mod tests {
     fn parse_addition_multiplication() {
         let mut scanner = Scanner::new_from_string(String::from("1 + 2 * 3;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let expr = parser.binary_expr(0).unwrap();
+        let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
@@ -314,7 +353,7 @@ mod tests {
     fn parse_division_subtraction_multiplication() {
         let mut scanner = Scanner::new_from_string(String::from("50 / 10 - 20 * 4;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let expr = parser.binary_expr(0).unwrap();
+        let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
             ASTop::MINUS,
@@ -337,7 +376,7 @@ mod tests {
     fn parse_division_subtraction_multiplication_with_parentheses() {
         let mut scanner = Scanner::new_from_string(String::from("50 / (10 - 20) * 4;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let expr = parser.binary_expr(0).unwrap();
+        let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
             ASTop::MULTIPLY,
@@ -361,7 +400,7 @@ mod tests {
         let mut scanner = Scanner::new_from_string(String::from("x = 5;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
         let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE, 4);
-        let expr = parser.binary_expr(0).unwrap();
+        let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
             ASTop::ASSIGN,
@@ -385,22 +424,35 @@ mod tests {
     fn parse_bin_expr_funccall_with_one_arg() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name(5 + 2)"));
         let mut parser = Parser::new(&mut scanner)?;
-        let sym = parser.add_global_symbol(
+        let func_sym = parser.add_global_symbol(
             "fn_name".to_string(),
             DataType::INT,
             0,
             SymType::FUNCTION,
             4,
         );
-        let expr = parser.binary_expr(0)?;
+        let func_param_sym = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            DataType::INT,
+            0,
+            "param_1".to_string(),
+            4,
+            SymType::VARIABLE,
+            SymClass::PARAM,
+        );
+        func_sym.borrow_mut().add_member(func_param_sym);
+        let expr = parser.expr_by_precedence(0)?;
 
         let expected = ASTnode::new_boxed(
             ASTop::FUNCCALL,
             ASTnode::new_leaf(ASTop::IDENT, 0),
-            ASTnode::new_boxed(
-                ASTop::ADD,
-                ASTnode::new_leaf(ASTop::INTLIT, 5),
-                ASTnode::new_leaf(ASTop::INTLIT, 2),
+            ASTnode::new_right_unary(
+                ASTop::FUNCPARAM,
+                ASTnode::new_boxed(
+                    ASTop::ADD,
+                    ASTnode::new_leaf(ASTop::INTLIT, 5),
+                    ASTnode::new_leaf(ASTop::INTLIT, 2),
+                ),
             ),
         );
 
@@ -408,7 +460,7 @@ mod tests {
 
         // Ensure IDENT has sym to the function
         assert!(Rc::ptr_eq(
-            &sym,
+            &func_sym,
             expr.left.as_ref().unwrap().symtable_entry.as_ref().unwrap()
         ));
 
@@ -426,7 +478,7 @@ mod tests {
             SymType::FUNCTION,
             4,
         );
-        let expr = parser.binary_expr(0)?;
+        let expr = parser.expr_by_precedence(0)?;
 
         let expected = ASTnode::new_unary(ASTop::FUNCCALL, ASTnode::new_leaf(ASTop::IDENT, 0));
 
@@ -452,6 +504,17 @@ mod tests {
             SymType::FUNCTION,
             0,
         );
+        let func_param_sym = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            DataType::INT,
+            0,
+            "param_1".to_string(),
+            4,
+            SymType::VARIABLE,
+            SymClass::PARAM,
+        );
+        func_sym.borrow_mut().add_member(func_param_sym);
+
         let var_sym = parser.add_global_symbol(
             "var_name".to_string(),
             DataType::INT,
@@ -459,12 +522,12 @@ mod tests {
             SymType::VARIABLE,
             4,
         );
-        let expr = parser.binary_expr(0)?;
+        let expr = parser.expr_by_precedence(0)?;
 
         let expected = ASTnode::new_boxed(
             ASTop::FUNCCALL,
             ASTnode::new_leaf(ASTop::IDENT, 0),
-            ASTnode::new_leaf(ASTop::IDENT, 0),
+            ASTnode::new_right_unary(ASTop::FUNCPARAM, ASTnode::new_leaf(ASTop::IDENT, 0)),
         );
 
         match_ast_node(Some(&expr), expected);
@@ -478,6 +541,104 @@ mod tests {
         // Ensure right node has sym to the argument
         assert!(Rc::ptr_eq(
             &var_sym,
+            expr.right
+                .as_ref()
+                .unwrap()
+                .right
+                .as_ref()
+                .unwrap()
+                .symtable_entry
+                .as_ref()
+                .unwrap()
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_bin_expr_funccall_with_two_args() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("fn_name(var_name, 2)"));
+        let mut parser = Parser::new(&mut scanner)?;
+        let func_sym = parser.add_global_symbol(
+            "fn_name".to_string(),
+            DataType::INT,
+            0,
+            SymType::FUNCTION,
+            0,
+        );
+        let func_param_sym_1 = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            DataType::INT,
+            0,
+            "param_1".to_string(),
+            4,
+            SymType::VARIABLE,
+            SymClass::PARAM,
+        );
+        func_sym.borrow_mut().add_member(func_param_sym_1);
+        let func_param_sym_2 = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            DataType::INT,
+            0,
+            "param_2".to_string(),
+            4,
+            SymType::VARIABLE,
+            SymClass::PARAM,
+        );
+        func_sym.borrow_mut().add_member(func_param_sym_2);
+
+        parser.add_global_symbol(
+            "var_name".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            4,
+        );
+        let expr = parser.expr_by_precedence(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::FUNCCALL,
+            ASTnode::new_leaf(ASTop::IDENT, 0),
+            ASTnode::new_boxed(
+                ASTop::FUNCPARAM,
+                ASTnode::new_right_unary(ASTop::FUNCPARAM, ASTnode::new_leaf(ASTop::IDENT, 0)),
+                ASTnode::new_leaf(ASTop::INTLIT, 2),
+            ),
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        // Ensure left node has sym to the function
+        assert!(Rc::ptr_eq(
+            &func_sym,
+            expr.left.as_ref().unwrap().symtable_entry.as_ref().unwrap()
+        ));
+
+        // Ensure that 1st param node has the sym for the 1st param
+        assert!(Rc::ptr_eq(
+            func_sym.borrow().members.as_ref().unwrap(),
+            expr.right
+                .as_ref()
+                .unwrap()
+                .left
+                .as_ref()
+                .unwrap()
+                .symtable_entry
+                .as_ref()
+                .unwrap()
+        ));
+
+        // Ensure that 2nd param node has the sym for the 2nd param
+        assert!(Rc::ptr_eq(
+            func_sym
+                .borrow()
+                .members
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .next
+                .as_ref()
+                .unwrap(),
             expr.right
                 .as_ref()
                 .unwrap()

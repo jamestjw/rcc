@@ -24,6 +24,7 @@ enum_str! {
         FUNCTION,
         RETURN,
         FUNCCALL,
+        FUNCPARAM,
     }
 
 }
@@ -56,6 +57,18 @@ impl ASTnode {
             op,
             left: Some(left),
             right: None,
+            int_value: 0,
+            symtable_entry: None,
+            rvalue: false,
+            label: None,
+        })
+    }
+
+    pub fn new_right_unary(op: ASTop, right: Box<ASTnode>) -> Box<ASTnode> {
+        Box::new(ASTnode {
+            op,
+            left: None,
+            right: Some(right),
             int_value: 0,
             symtable_entry: None,
             rvalue: false,

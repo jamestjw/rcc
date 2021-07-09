@@ -4,8 +4,8 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::parser::SymbolTableEntry;
 use crate::parser::{ASTnode, ASTop};
+use crate::parser::{SymPosition, SymbolTableEntry};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,9 +52,10 @@ pub trait Generator {
     fn func_preamble(&mut self, fn_name: &str);
     fn func_postamble(&mut self, end_label: &str);
     fn return_from_func(&mut self, label: &str, r: Option<usize>);
-    fn funccall(&mut self, fn_name: &str, r1: Option<usize>) -> usize;
+    fn funccall(&mut self, fn_name: &str, num_params: usize) -> usize;
     fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
     fn set_sym_positions(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
+    fn move_to_position(&mut self, r: usize, posn: &SymPosition);
 }
 
 // Generates the code for the ASTnode,
@@ -164,10 +165,49 @@ fn generate_code_for_funccall(generator: &mut impl Generator, fn_node: &Box<ASTn
         .unwrap()
         .borrow();
     let param_node = fn_node.right.as_ref();
-    let param_reg = match param_node {
-        Some(param_node) => generate_code_for_node(generator, param_node),
-        None => None,
+    let mut num_params = 0;
+    match param_node {
+        Some(param_node) => {
+            num_params = generate_code_for_funccall_param(generator, param_node);
+        }
+        None => {}
     };
 
-    return generator.funccall(&fn_sym.name, param_reg);
+    return generator.funccall(&fn_sym.name, num_params as usize);
+}
+
+// Returns the number of params that we generated code for
+fn generate_code_for_funccall_param(
+    generator: &mut impl Generator,
+    param_node: &Box<ASTnode>,
+) -> u8 {
+    match &param_node.right {
+        Some(n) => {
+            let r = generate_code_for_node(generator, n);
+            match r {
+                Some(r) => {
+                    // Symtable entry should be available here, this shouldn't ever
+                    // fail for FUNCPARAMs
+                    generator.move_to_position(
+                        r,
+                        &param_node.symtable_entry.as_ref().unwrap().borrow().posn,
+                    );
+                }
+                None => {
+                    // This branch should never be invoked.
+                    panic!("Expression to be used an argument to function is returned nothing.");
+                }
+            };
+        }
+        None => {
+            // This should never happen.
+            panic!("Empty right node for ASTop::FUNCPARAM node.");
+        }
+    }
+
+    if let Some(next_node) = &param_node.left {
+        generate_code_for_funccall_param(generator, next_node) + 1
+    } else {
+        1
+    }
 }

@@ -14,6 +14,8 @@ I will try to document the progress of this project as best as I can. I will mos
 
 7/7/2021 - Support the parsing of function declarations and return statements. Added minimal support for function calls with no arguments.
 
+10/7/2021 - Support calling functions with multiple parameters according to x86-64 C calling convention.
+
 ## Tests
 To run all unit tests only
 ``` bash
