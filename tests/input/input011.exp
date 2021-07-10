@@ -1,0 +1,2 @@
+Error on line 1 in tests/input/input011-err.c:
+Unable to declare variables with void type.

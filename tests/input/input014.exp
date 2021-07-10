@@ -1,0 +1,2 @@
+Error on line 2 in tests/input/input014-err.c:
+Empty return statements are not allowed in non-void functions.

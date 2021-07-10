@@ -7,7 +7,7 @@ int big_add(int a, int b, int c, int d, int e, int f, int g, int h) {
 int main() {
     x = big_add(1, 2, 3, 4, 5, 6, 7, 8);
 
-    print(x);
+    printint(x);
 
     return 0;
 }

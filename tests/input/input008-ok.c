@@ -6,7 +6,7 @@ int increment(int i) {
 
 int main() {
     x = increment(10);
-    print(x);
+    printint(x);
 
     return 0;
 }

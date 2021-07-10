@@ -1,0 +1,2 @@
+Error on line 2 in tests/input/input015-err.c:
+Unable to return values from void functions.

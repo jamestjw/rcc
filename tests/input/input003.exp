@@ -1,2 +1,2 @@
 Error on line 5 in tests/input/input003-err.c:
-Syntax error, expected ';' token but 'print' was found instead.
+Syntax error, expected ';' token but 'identifier' was found instead.

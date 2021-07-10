@@ -97,10 +97,6 @@ pub fn generate_code_for_node(
         ASTop::MINUS => Some(generator.minus(left_reg?, right_reg?)),
         ASTop::MULTIPLY => Some(generator.multiply(left_reg?, right_reg?)),
         ASTop::DIVIDE => Some(generator.divide(left_reg?, right_reg?)),
-        ASTop::PRINT => {
-            generator.print(left_reg?);
-            None
-        }
         ASTop::IDENT => {
             if node.rvalue {
                 let sym = node.symtable_entry.as_ref().unwrap().borrow();

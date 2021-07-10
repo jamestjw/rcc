@@ -239,25 +239,9 @@ impl Generator for Generator_x86_64 {
     }
 
     fn preamble(&mut self) {
-        let printint_code = r#"
-    .text
-.LCprintint:
-    .string "%d\n"
-printint:
-    pushq   %rbp
-    movq    %rsp, %rbp
-    subq    $16, %rsp
-    movl    %edi, -4(%rbp)
-    movl    -4(%rbp), %eax
-    movl    %eax, %esi
-    leaq    .LCprintint(%rip), %rdi
-    movl    $0, %eax
-    call    printf@PLT
-    nop
-    leave
-    ret
-"#;
-        self.output_str.push_str(printint_code);
+        // For now we assume that everything after the preamble falls in the
+        // text section.
+        self.output_str.push_str("\t.text\n");
     }
 
     fn postamble(&mut self) {}

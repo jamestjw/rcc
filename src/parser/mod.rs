@@ -80,6 +80,27 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // Parses the next token as a type, e.g. INT, VOID
+    pub fn parse_type(&mut self) -> Result<TokenType, Box<dyn Error>> {
+        let res: Result<TokenType, Box<dyn Error>> = match &self.current_token {
+            Some(tok) => match tok.token_type {
+                TokenType::INT | TokenType::VOID => Ok(tok.token_type),
+                _ => Err(format!(
+                    "Expected data type but encountered {} instead.",
+                    tok.token_type
+                )
+                .into()),
+            },
+            None => Err("Unexpected end of input.".into()),
+        };
+
+        if res.is_ok() {
+            self.consume()?;
+        }
+
+        res
+    }
+
     pub fn add_global_symbol(
         &mut self,
         lexeme: String,
@@ -117,6 +138,49 @@ fn match_ast_node(actual: Option<&Box<ASTnode>>, expected: Box<ASTnode>) {
         }
         None => {
             panic!("Node empty.")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_type_with_valid_type() {
+        let mut scanner = Scanner::new_from_string(String::from("int x;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let res = parser.parse_type();
+
+        match res {
+            Ok(t) => {
+                assert_eq!(t, TokenType::INT);
+
+                // Check that the INT token has been consumed
+                assert_eq!(parser.current_token.unwrap().token_type, TokenType::IDENT);
+            }
+            Err(e) => {
+                panic!("Failed to parse type with unexpected error: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn parse_type_with_invalid_type() {
+        let mut scanner = Scanner::new_from_string(String::from("double x;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let res = parser.parse_type();
+
+        match res {
+            Ok(_) => {
+                panic!("Parsing of type should have failed");
+            }
+            Err(e) => {
+                assert_eq!(
+                    "Expected data type but encountered identifier instead.",
+                    e.to_string()
+                );
+            }
         }
     }
 }

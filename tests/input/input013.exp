@@ -1,0 +1,2 @@
+Error on line 1 in tests/input/input013-err.c:
+Unable to define function parameters with void type.

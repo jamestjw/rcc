@@ -10,9 +10,10 @@ use std::rc::Rc;
 
 use crate::token::TokenType;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum DataType {
     INT,
+    VOID,
 }
 
 impl TryFrom<TokenType> for DataType {
@@ -21,6 +22,7 @@ impl TryFrom<TokenType> for DataType {
     fn try_from(token_type: TokenType) -> Result<Self, Self::Error> {
         match token_type {
             TokenType::INT => Ok(DataType::INT),
+            TokenType::VOID => Ok(DataType::VOID),
             _ => Err(format!(
                 "Unable to convert {} token to type.",
                 token_type.name()

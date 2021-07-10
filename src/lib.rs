@@ -10,6 +10,7 @@ pub mod parser;
 pub mod scanner;
 pub mod token;
 
+use crate::parser::{DataType, SymClass, SymType, SymbolTableEntry};
 use code_generation::Generator;
 use std::path::Path;
 use std::process::Command;
@@ -49,6 +50,24 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
             return Err(format!("Could not initialise parser:\n{}", err));
         }
     };
+    // TODO: Remove this after linking standard library
+    // We are manually adding the function symbol to allow us to
+    // avoid parsing errors
+    let printint_sym = parser.add_global_symbol(
+        "printint".to_string(),
+        DataType::VOID,
+        0,
+        SymType::FUNCTION,
+        0,
+    );
+    printint_sym.borrow_mut().add_member(SymbolTableEntry::new(
+        DataType::INT,
+        0,
+        "x".to_string(),
+        4,
+        SymType::VARIABLE,
+        SymClass::PARAM,
+    ));
 
     let stmts = match parser.parse_global_declarations() {
         Ok(stmt) => stmt,
@@ -79,7 +98,12 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
 // TODO: Support multiple input files
 pub fn assemble_and_link(input_fname: &Path, output_fname: &Path) {
     let mut assemble = Command::new("cc");
-    assemble.arg("-o").arg(output_fname).arg(input_fname);
+    println!("{:?} {:?}", input_fname, output_fname);
+    assemble
+        .arg("-o")
+        .arg(output_fname)
+        .arg(input_fname)
+        .arg("src/extras/print.c");
     assemble
         .status()
         .expect("Failed to execute assembler and linker");

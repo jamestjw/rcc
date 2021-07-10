@@ -167,11 +167,11 @@ impl Scanner {
         if lexeme.starts_with('i') && lexeme == "int" {
             return TokenType::INT;
         }
-        if lexeme.starts_with('p') && lexeme == "print" {
-            return TokenType::PRINT;
-        }
         if lexeme.starts_with('r') && lexeme == "return" {
             return TokenType::RETURN;
+        }
+        if lexeme.starts_with('v') && lexeme == "void" {
+            return TokenType::VOID;
         }
 
         return TokenType::IDENT;
@@ -195,42 +195,5 @@ mod tests {
 
         assert_eq!(scanner.next_char(), Some('1'));
         assert_eq!(scanner.scan_int('1'), 12345);
-    }
-
-    #[test]
-    fn scan_tokens_print_statement() {
-        let mut scanner = Scanner::new_from_string(String::from(" print(42+79);  "));
-
-        assert_eq!(scanner.next_char(), Some('p'));
-        assert_eq!(scanner.scan_ident('p'), "print");
-
-        let expected_types: Vec<(TokenType, i32)> = vec![
-            (TokenType::PRINT, 0),
-            (TokenType::LPAREN, 0),
-            (TokenType::INTLIT, 42),
-            (TokenType::PLUS, 0),
-            (TokenType::INTLIT, 79),
-            (TokenType::RPAREN, 0),
-            (TokenType::SEMI, 0),
-            (TokenType::EOF, 0),
-        ];
-
-        let mut res_idx = 1;
-        loop {
-            match scanner.next_token() {
-                Ok(tok) => {
-                    let (token_type, int_value) = expected_types[res_idx];
-                    assert_eq!(tok.token_type, token_type);
-                    assert_eq!(tok.int_value, int_value);
-                    res_idx += 1;
-                    if tok.token_type == TokenType::EOF {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    panic!("Failed to next_token token with error {}", e);
-                }
-            };
-        }
     }
 }

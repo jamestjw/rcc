@@ -38,7 +38,6 @@ impl<'a> Parser<'a> {
     pub fn parse_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
         let statement = match &self.current_token {
             Some(tok) => match tok.token_type {
-                TokenType::PRINT => self.print_statement()?,
                 TokenType::RETURN => self.parse_return()?,
                 _ => {
                     let node = self.expr_by_precedence(0)?;
@@ -57,17 +56,17 @@ impl<'a> Parser<'a> {
     // Parse a global declaration and maybe return an ASTnode.
     // Global var declarations do not yield ASTNodes
     fn parse_global_declaration(&mut self) -> Result<Option<Box<ASTnode>>, Box<dyn Error>> {
-        self.match_token(TokenType::INT)?;
+        let data_type = DataType::try_from(self.parse_type()?)?;
         let ident = self.match_token(TokenType::IDENT)?;
 
         match &self.current_token {
             Some(tok) => match tok.token_type {
                 TokenType::LPAREN => {
-                    let tree = self.parse_func_declaration(ident)?;
+                    let tree = self.parse_func_declaration(ident, data_type)?;
                     Ok(Some(tree))
                 }
                 TokenType::SEMI | TokenType::COMMA => {
-                    self.parse_global_var_declaration(TokenType::INT, ident)?;
+                    self.parse_global_var_declaration(data_type, ident)?;
                     Ok(None)
                 }
                 _ => Err(format!("Syntax error, unexpected '{}' found", tok.token_type).into()),
@@ -82,18 +81,16 @@ impl<'a> Parser<'a> {
     // been scanned prior to invocation of this function
     fn parse_global_var_declaration(
         &mut self,
-        data_type: TokenType,
+        data_type: DataType,
         ident: Token,
     ) -> Result<(), Box<dyn Error>> {
         // TODO: Allow assignation of initial value during declaration
 
-        self.add_global_symbol(
-            ident.lexeme,
-            DataType::try_from(data_type)?,
-            0,
-            SymType::VARIABLE,
-            4,
-        );
+        if data_type == DataType::VOID {
+            return Err("Unable to declare variables with void type.".into());
+        }
+
+        self.add_global_symbol(ident.lexeme, data_type, 0, SymType::VARIABLE, 4);
 
         match &self.current_token {
             Some(token) => {
@@ -120,12 +117,17 @@ impl<'a> Parser<'a> {
     // We require these parameters as these tokens should have
     // been scanned prior to invocation of this function
     fn parse_func_param_declaration(&mut self) -> Result<SymbolTableEntry, Box<dyn Error>> {
-        self.match_token(TokenType::INT)?;
+        let data_type = DataType::try_from(self.parse_type()?)?;
+
+        if data_type == DataType::VOID {
+            return Err("Unable to define function parameters with void type.".into());
+        }
+
         let ident = self.match_token(TokenType::IDENT)?;
 
         let mut sym = SymbolTableEntry::new(
             // TODO: Parse datatype
-            DataType::try_from(TokenType::INT)?,
+            data_type,
             0,
             ident.lexeme.clone(),
             4,
@@ -154,8 +156,13 @@ impl<'a> Parser<'a> {
         Ok(sym)
     }
 
-    fn parse_func_declaration(&mut self, ident: Token) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        let sym = self.add_global_symbol(ident.lexeme, DataType::INT, 0, SymType::FUNCTION, 0);
+    fn parse_func_declaration(
+        &mut self,
+        ident: Token,
+        data_type: DataType,
+    ) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        // We add the symbol here so that recursive calls work
+        let sym = self.add_global_symbol(ident.lexeme, data_type, 0, SymType::FUNCTION, 0);
 
         // TODO: Support defining parameters
         self.match_token(TokenType::LPAREN)?;
@@ -169,9 +176,6 @@ impl<'a> Parser<'a> {
         self.match_token(TokenType::LBRACE)?;
 
         let mut tree: Option<Box<ASTnode>> = None;
-
-        // TODO: Figure out the right return type
-        // We add the symbol here so that recursive calls work
 
         // Point to the symbol of the function we are parsing so that it can be referenced
         // when we parse the body of the function.
@@ -194,9 +198,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // TODO: Ensure that return statement is included for non-void functions.
-        // Alternately, we can allow this and emit a warning
-        if last_op != ASTop::RETURN {
+        // TODO: Eventually we have to check if return statements were included
+        // in different branches of control flow statements, i.e. return statements
+        // will not always be last statement within a function
+        if data_type != DataType::VOID && last_op != ASTop::RETURN {
             return Err("Return value must be provided in non-void function.".into());
         }
 
@@ -217,59 +222,47 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_return(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        if self.current_func_sym.is_none() {
-            return Err(format!("Cannot return from outside a function.").into());
-        }
+        let ret_type = match &self.current_func_sym {
+            Some(fn_sym) => fn_sym.borrow().data_type,
+            None => {
+                return Err(format!("Cannot return from outside a function.").into());
+            }
+        };
+
         self.match_token(TokenType::RETURN)?;
-        let binary_node = self.expr_by_precedence(0)?;
+
+        let mut ret_node = match self.is_token_type(TokenType::SEMI)? {
+            true => {
+                if ret_type != DataType::VOID {
+                    return Err(
+                        "Empty return statements are not allowed in non-void functions.".into(),
+                    );
+                }
+                ASTnode::new_leaf(ASTop::RETURN, 0)
+            }
+            false => {
+                if ret_type == DataType::VOID {
+                    return Err("Unable to return values from void functions.".into());
+                }
+                let binary_node = self.expr_by_precedence(0)?;
+                ASTnode::new_unary(ASTop::RETURN, binary_node)
+            }
+        };
+
         self.match_token(TokenType::SEMI)?;
 
-        // TODO: Ensure that returning values is not allowed in void
-        // functions.
-        let mut ret_node = ASTnode::new_unary(
-            ASTop::RETURN,
-            binary_node, // TODO: Make this return ASTop::RETURN by default
-        );
-
-        // Unwrap since we already verified that this is not none at the beginning of the function
+        // Safe to unwrap since the presence of current_func_sym has been verifed before
         ret_node.label = Some(generate_label_for_function(
             &self.current_func_sym.as_ref().unwrap().borrow(),
         ));
 
         Ok(ret_node)
     }
-
-    pub fn print_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        self.match_token(TokenType::PRINT)?;
-        self.match_token(TokenType::LPAREN)?;
-        let binary_node = self.expr_by_precedence(0)?;
-        self.match_token(TokenType::RPAREN)?;
-        self.match_token(TokenType::SEMI)?;
-
-        Ok(ASTnode::new_unary(ASTop::PRINT, binary_node))
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_print_statement() {
-        let mut scanner = Scanner::new_from_string(String::from("print(51+24);"));
-        let mut parser = Parser::new(&mut scanner).unwrap();
-        let expr = parser.print_statement().unwrap();
-        let expected = ASTnode::new_unary(
-            ASTop::PRINT,
-            ASTnode::new_boxed(
-                ASTop::ADD,
-                ASTnode::new_leaf(ASTop::INTLIT, 51),
-                ASTnode::new_leaf(ASTop::INTLIT, 24),
-            ),
-        );
-
-        match_ast_node(Some(&expr), expected);
-    }
 
     #[test]
     fn parse_global_single_var_declaration() {
@@ -316,6 +309,22 @@ mod tests {
                 assert_eq!(new_sym.sym_type, SymType::VARIABLE);
             }
             None => panic!("New symbol table entry for y was not found"),
+        }
+    }
+
+    #[test]
+    fn parse_global_void_var_declaration() {
+        let mut scanner = Scanner::new_from_string(String::from("void x;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let expr = parser.parse_global_declaration();
+
+        match expr {
+            Ok(_) => {
+                panic!("Declaration of global variable with void type should have failed");
+            }
+            Err(e) => {
+                assert_eq!("Unable to declare variables with void type.", e.to_string());
+            }
         }
     }
 
@@ -426,6 +435,26 @@ mod tests {
                 assert_eq!(param_sym_2.name, "y");
             }
             None => panic!("New symbol table entry not found"),
+        }
+    }
+
+    #[test]
+    fn parse_func_declaration_with_void_param() {
+        let mut scanner = Scanner::new_from_string(String::from("int test(void x) { return 1; }"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let expr = parser.parse_global_declaration();
+
+        match expr {
+            Ok(_) => {
+                panic!("Parsing of function with void parameter should have failed.");
+            }
+
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "Unable to define function parameters with void type."
+                );
+            }
         }
     }
 }

@@ -6,7 +6,7 @@ int simple_function() {
 
 int main() {
     x = simple_function();
-    print(x);
+    printint(x);
 
     return 0;
 }

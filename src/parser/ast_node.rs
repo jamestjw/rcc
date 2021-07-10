@@ -17,7 +17,6 @@ enum_str! {
         DIVIDE,
         INTLIT,
         IDENT,
-        PRINT,
         ASSIGN,
         NOOP,
         GLUE,
