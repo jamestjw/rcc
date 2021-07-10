@@ -12,7 +12,9 @@ use crate::token::TokenType;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum DataType {
+    NONE, // To be used there is no specific type
     INT,
+    CHAR,
     VOID,
 }
 
@@ -21,6 +23,7 @@ impl TryFrom<TokenType> for DataType {
 
     fn try_from(token_type: TokenType) -> Result<Self, Self::Error> {
         match token_type {
+            TokenType::CHAR => Ok(DataType::CHAR),
             TokenType::INT => Ok(DataType::INT),
             TokenType::VOID => Ok(DataType::VOID),
             _ => Err(format!(

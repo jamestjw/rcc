@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
     pub fn parse_type(&mut self) -> Result<TokenType, Box<dyn Error>> {
         let res: Result<TokenType, Box<dyn Error>> = match &self.current_token {
             Some(tok) => match tok.token_type {
-                TokenType::INT | TokenType::VOID => Ok(tok.token_type),
+                TokenType::CHAR | TokenType::INT | TokenType::VOID => Ok(tok.token_type),
                 _ => Err(format!(
                     "Expected data type but encountered {} instead.",
                     tok.token_type
@@ -129,6 +129,7 @@ fn match_ast_node(actual: Option<&Box<ASTnode>>, expected: Box<ASTnode>) {
         Some(actual) => {
             assert_eq!(actual.op, expected.op);
             assert_eq!(actual.int_value, expected.int_value);
+            assert_eq!(actual.data_type, expected.data_type);
             if let Some(left) = expected.left {
                 match_ast_node(actual.left.as_ref(), left);
             }

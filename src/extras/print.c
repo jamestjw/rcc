@@ -5,3 +5,7 @@
 void printint(int x) {
     printf("%d\n", x);
 }
+
+void printchar(char c) {
+    printf("%c\n", c);
+}

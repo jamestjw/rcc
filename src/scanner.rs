@@ -58,6 +58,10 @@ impl Scanner {
                     int_value = self.scan_int(c) as i32;
                     TokenType::INTLIT
                 }
+                '\'' => {
+                    int_value = self.scan_char()? as i32;
+                    TokenType::INTLIT
+                }
                 c if c.is_alphabetic() => {
                     lexeme.push_str(&self.scan_ident(c));
                     self.token_type_from_lexeme(&lexeme)
@@ -161,9 +165,36 @@ impl Scanner {
         res
     }
 
+    // Scans a char literal
+    // To be called the current character is the quotation mark
+    // that denotes the start of the char literal.
+    fn scan_char(&mut self) -> Result<u8, Box<dyn Error>> {
+        let c = match self.next_char() {
+            Some(c) => c as u8,
+            None => {
+                return Err("Unexpected end of input stream while parsing char literal".into());
+            }
+        };
+
+        match self.next_char() {
+            Some(c) => {
+                if c != '\'' {
+                    return Err("Expected quote to terminate char literal.".into());
+                }
+            }
+            None => {
+                return Err("Unexpected end of input stream while parsing char literal".into());
+            }
+        };
+        Ok(c)
+    }
+
     // Distinguish between identifiers and specific token types
     // based on a lexeme
     fn token_type_from_lexeme(&self, lexeme: &str) -> TokenType {
+        if lexeme.starts_with('c') && lexeme == "char" {
+            return TokenType::CHAR;
+        }
         if lexeme.starts_with('i') && lexeme == "int" {
             return TokenType::INT;
         }

@@ -44,8 +44,14 @@ impl<'a> Parser<'a> {
                     left = fn_node;
                 } else {
                     self.consume()?;
-
-                    left = ASTnode::new_unary(token_type_to_postfix_op(op_tok_type), left);
+                    // Here we are making the assumption that normal postfix operators
+                    // do not change the data type of their operands
+                    let prev_data_type = left.data_type;
+                    left = ASTnode::new_unary(
+                        token_type_to_postfix_op(op_tok_type),
+                        left,
+                        prev_data_type,
+                    );
                 }
 
                 continue;
@@ -69,7 +75,15 @@ impl<'a> Parser<'a> {
                     right.rvalue = true;
                 }
 
-                left = ASTnode::new_boxed(token_type_to_binary_op(op_tok_type), left, right);
+                let resulting_data_type = left.data_type;
+
+                // TODO: Data type of resulting node should be the wider type
+                left = ASTnode::new_boxed(
+                    token_type_to_binary_op(op_tok_type),
+                    left,
+                    right,
+                    resulting_data_type,
+                );
             } else {
                 break;
             }
@@ -109,15 +123,23 @@ impl<'a> Parser<'a> {
                         };
                     }
 
-                    let mut node = ASTnode::new_leaf(ASTop::IDENT, 0);
+                    let mut node = ASTnode::new_leaf(
+                        ASTop::IDENT,
+                        0,
+                        symtable_entry.as_ref().unwrap().borrow().data_type,
+                    );
                     node.symtable_entry = Some(Rc::clone(symtable_entry.as_ref().unwrap()));
 
                     Ok(node)
                 }
-                TokenType::INTLIT => Ok(ASTnode::new_leaf(
-                    ASTop::INTLIT,
-                    self.match_token(TokenType::INTLIT)?.int_value,
-                )),
+                TokenType::INTLIT => {
+                    let int_value = self.match_token(TokenType::INTLIT)?.int_value;
+                    let data_type = match int_value {
+                        _ if int_value >= 0 && int_value < 256 => DataType::CHAR,
+                        _ => DataType::INT,
+                    };
+                    Ok(ASTnode::new_leaf(ASTop::INTLIT, int_value, data_type))
+                }
                 _ => Err(format!(
                     "Syntax error, expected primary expression but found '{}' instead.",
                     tok.token_type
@@ -137,7 +159,6 @@ impl<'a> Parser<'a> {
     pub fn parse_func_call(
         &mut self,
         sym: &SymbolTableEntry,
-        // sym: &Rc<SymbolTableEntry>,
     ) -> Result<Box<ASTnode>, Box<dyn Error>> {
         match sym.sym_type {
             SymType::FUNCTION => {}
@@ -168,17 +189,21 @@ impl<'a> Parser<'a> {
                         }
                         Some(ref n) => Rc::clone(n),
                     };
-                    // TODO: Here we are only accepting one argument
+                    let new_expr = self.expr_by_precedence(0)?;
                     if arg.is_none() {
-                        let mut new_node =
-                            ASTnode::new_right_unary(ASTop::FUNCPARAM, self.expr_by_precedence(0)?);
+                        let mut new_node = ASTnode::new_right_unary(
+                            ASTop::FUNCPARAM,
+                            new_expr,
+                            param_node.borrow().data_type,
+                        );
                         new_node.symtable_entry = Some(Rc::clone(&param_node));
                         arg = Some(new_node);
                     } else {
                         let mut new_node = ASTnode::new_boxed(
                             ASTop::FUNCPARAM,
                             arg.unwrap(),
-                            self.expr_by_precedence(0)?,
+                            new_expr,
+                            param_node.borrow().data_type,
                         );
                         new_node.symtable_entry = Some(Rc::clone(&param_node));
                         arg = Some(new_node);
@@ -198,7 +223,7 @@ impl<'a> Parser<'a> {
 
         self.match_token(TokenType::RPAREN)?;
 
-        let mut funccall_node = ASTnode::new_leaf(ASTop::FUNCCALL, 0);
+        let mut funccall_node = ASTnode::new_leaf(ASTop::FUNCCALL, 0, sym.data_type);
 
         // Reserve left node for function IDENT
         funccall_node.right = arg;
@@ -257,10 +282,12 @@ mod tests {
         let mut scanner = Scanner::new_from_string(String::from("51+24;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
         let expr = parser.expr_by_precedence(0).unwrap();
+
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
-            ASTnode::new_leaf(ASTop::INTLIT, 51),
-            ASTnode::new_leaf(ASTop::INTLIT, 24),
+            ASTnode::new_leaf(ASTop::INTLIT, 51, DataType::CHAR),
+            ASTnode::new_leaf(ASTop::INTLIT, 24, DataType::CHAR),
+            DataType::CHAR,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -273,8 +300,9 @@ mod tests {
         let expr = parser.expr_by_precedence(0).unwrap();
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
-            ASTnode::new_leaf(ASTop::INTLIT, 51),
-            ASTnode::new_leaf(ASTop::INTLIT, 24),
+            ASTnode::new_leaf(ASTop::INTLIT, 51, DataType::CHAR),
+            ASTnode::new_leaf(ASTop::INTLIT, 24, DataType::CHAR),
+            DataType::CHAR,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -338,12 +366,14 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
-            ASTnode::new_leaf(ASTop::INTLIT, 1),
+            ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
             ASTnode::new_boxed(
                 ASTop::MULTIPLY,
-                ASTnode::new_leaf(ASTop::INTLIT, 2),
-                ASTnode::new_leaf(ASTop::INTLIT, 3),
+                ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 3, DataType::CHAR),
+                DataType::CHAR,
             ),
+            DataType::CHAR,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -359,14 +389,17 @@ mod tests {
             ASTop::MINUS,
             ASTnode::new_boxed(
                 ASTop::DIVIDE,
-                ASTnode::new_leaf(ASTop::INTLIT, 50),
-                ASTnode::new_leaf(ASTop::INTLIT, 10),
+                ASTnode::new_leaf(ASTop::INTLIT, 50, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::CHAR),
+                DataType::CHAR,
             ),
             ASTnode::new_boxed(
                 ASTop::MULTIPLY,
-                ASTnode::new_leaf(ASTop::INTLIT, 20),
-                ASTnode::new_leaf(ASTop::INTLIT, 4),
+                ASTnode::new_leaf(ASTop::INTLIT, 20, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 4, DataType::CHAR),
+                DataType::CHAR,
             ),
+            DataType::CHAR,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -382,14 +415,17 @@ mod tests {
             ASTop::MULTIPLY,
             ASTnode::new_boxed(
                 ASTop::DIVIDE,
-                ASTnode::new_leaf(ASTop::INTLIT, 50),
+                ASTnode::new_leaf(ASTop::INTLIT, 50, DataType::CHAR),
                 ASTnode::new_boxed(
                     ASTop::MINUS,
-                    ASTnode::new_leaf(ASTop::INTLIT, 10),
-                    ASTnode::new_leaf(ASTop::INTLIT, 20),
+                    ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::CHAR),
+                    ASTnode::new_leaf(ASTop::INTLIT, 20, DataType::CHAR),
+                    DataType::CHAR,
                 ),
+                DataType::CHAR,
             ),
-            ASTnode::new_leaf(ASTop::INTLIT, 4),
+            ASTnode::new_leaf(ASTop::INTLIT, 4, DataType::CHAR),
+            DataType::CHAR,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -404,8 +440,36 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::ASSIGN,
-            ASTnode::new_leaf(ASTop::IDENT, 0),
-            ASTnode::new_leaf(ASTop::INTLIT, 5),
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::CHAR),
+            DataType::INT,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        match expr.left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym, &s));
+            }
+            None => {
+                panic!("ASTnode does not contain reference to symtable entry.");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_simple_char_assignment() {
+        let mut scanner = Scanner::new_from_string(String::from("x = 'c';"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let sym =
+            parser.add_global_symbol("x".to_string(), DataType::CHAR, 0, SymType::VARIABLE, 4);
+        let expr = parser.expr_by_precedence(0).unwrap();
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::CHAR),
+            ASTnode::new_leaf(ASTop::INTLIT, 99, DataType::CHAR),
+            DataType::CHAR,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -445,15 +509,18 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::FUNCCALL,
-            ASTnode::new_leaf(ASTop::IDENT, 0),
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
             ASTnode::new_right_unary(
                 ASTop::FUNCPARAM,
                 ASTnode::new_boxed(
                     ASTop::ADD,
-                    ASTnode::new_leaf(ASTop::INTLIT, 5),
-                    ASTnode::new_leaf(ASTop::INTLIT, 2),
+                    ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::CHAR),
+                    ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::CHAR),
+                    DataType::CHAR,
                 ),
+                DataType::INT,
             ),
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -480,7 +547,11 @@ mod tests {
         );
         let expr = parser.expr_by_precedence(0)?;
 
-        let expected = ASTnode::new_unary(ASTop::FUNCCALL, ASTnode::new_leaf(ASTop::IDENT, 0));
+        let expected = ASTnode::new_unary(
+            ASTop::FUNCCALL,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            DataType::INT,
+        );
 
         match_ast_node(Some(&expr), expected);
 
@@ -526,8 +597,13 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::FUNCCALL,
-            ASTnode::new_leaf(ASTop::IDENT, 0),
-            ASTnode::new_right_unary(ASTop::FUNCPARAM, ASTnode::new_leaf(ASTop::IDENT, 0)),
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_right_unary(
+                ASTop::FUNCPARAM,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                DataType::INT,
+            ),
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -598,12 +674,18 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::FUNCCALL,
-            ASTnode::new_leaf(ASTop::IDENT, 0),
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
             ASTnode::new_boxed(
                 ASTop::FUNCPARAM,
-                ASTnode::new_right_unary(ASTop::FUNCPARAM, ASTnode::new_leaf(ASTop::IDENT, 0)),
-                ASTnode::new_leaf(ASTop::INTLIT, 2),
+                ASTnode::new_right_unary(
+                    ASTop::FUNCPARAM,
+                    ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                    DataType::INT,
+                ),
+                ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::CHAR),
+                DataType::INT,
             ),
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);

@@ -69,6 +69,22 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         SymClass::PARAM,
     ));
 
+    let printchar_sym = parser.add_global_symbol(
+        "printchar".to_string(),
+        DataType::VOID,
+        0,
+        SymType::FUNCTION,
+        0,
+    );
+    printchar_sym.borrow_mut().add_member(SymbolTableEntry::new(
+        DataType::CHAR,
+        0,
+        "c".to_string(),
+        4,
+        SymType::VARIABLE,
+        SymClass::PARAM,
+    ));
+
     let stmts = match parser.parse_global_declarations() {
         Ok(stmt) => stmt,
         Err(err) => {

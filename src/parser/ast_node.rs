@@ -28,6 +28,7 @@ enum_str! {
 
 }
 
+#[derive(Debug)]
 pub struct ASTnode {
     pub op: ASTop,
     pub left: Option<Box<ASTnode>>,
@@ -36,10 +37,13 @@ pub struct ASTnode {
     pub symtable_entry: Option<Rc<RefCell<SymbolTableEntry>>>,
     pub rvalue: bool,
     pub label: Option<String>,
+    // The type of data contained in this node
+    // DataType::NONE if this node yields nothing
+    pub data_type: DataType,
 }
 
 impl ASTnode {
-    pub fn new_leaf(op: ASTop, int_value: i32) -> Box<ASTnode> {
+    pub fn new_leaf(op: ASTop, int_value: i32, data_type: DataType) -> Box<ASTnode> {
         Box::new(ASTnode {
             op: op,
             left: None,
@@ -48,10 +52,11 @@ impl ASTnode {
             symtable_entry: None,
             rvalue: false,
             label: None,
+            data_type,
         })
     }
 
-    pub fn new_unary(op: ASTop, left: Box<ASTnode>) -> Box<ASTnode> {
+    pub fn new_unary(op: ASTop, left: Box<ASTnode>, data_type: DataType) -> Box<ASTnode> {
         Box::new(ASTnode {
             op,
             left: Some(left),
@@ -60,10 +65,11 @@ impl ASTnode {
             symtable_entry: None,
             rvalue: false,
             label: None,
+            data_type,
         })
     }
 
-    pub fn new_right_unary(op: ASTop, right: Box<ASTnode>) -> Box<ASTnode> {
+    pub fn new_right_unary(op: ASTop, right: Box<ASTnode>, data_type: DataType) -> Box<ASTnode> {
         Box::new(ASTnode {
             op,
             left: None,
@@ -72,10 +78,16 @@ impl ASTnode {
             symtable_entry: None,
             rvalue: false,
             label: None,
+            data_type,
         })
     }
 
-    pub fn new_boxed(op: ASTop, left: Box<ASTnode>, right: Box<ASTnode>) -> Box<ASTnode> {
+    pub fn new_boxed(
+        op: ASTop,
+        left: Box<ASTnode>,
+        right: Box<ASTnode>,
+        data_type: DataType,
+    ) -> Box<ASTnode> {
         Box::new(ASTnode {
             op,
             left: Some(left),
@@ -84,6 +96,7 @@ impl ASTnode {
             symtable_entry: None,
             rvalue: false,
             label: None,
+            data_type,
         })
     }
 
@@ -96,6 +109,7 @@ impl ASTnode {
             symtable_entry: None,
             rvalue: false,
             label: None,
+            data_type: DataType::NONE,
         })
     }
 }

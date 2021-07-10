@@ -18,7 +18,12 @@ impl<'a> Parser<'a> {
             if let Some(node) = node {
                 match tree {
                     Some(original_tree) => {
-                        tree = Some(ASTnode::new_boxed(ASTop::GLUE, original_tree, node))
+                        tree = Some(ASTnode::new_boxed(
+                            ASTop::GLUE,
+                            original_tree,
+                            node,
+                            DataType::NONE,
+                        ))
                     }
                     None => {
                         tree = Some(node);
@@ -190,7 +195,12 @@ impl<'a> Parser<'a> {
 
             match tree {
                 Some(original_tree) => {
-                    tree = Some(ASTnode::new_boxed(ASTop::GLUE, original_tree, node))
+                    tree = Some(ASTnode::new_boxed(
+                        ASTop::GLUE,
+                        original_tree,
+                        node,
+                        DataType::NONE,
+                    ))
                 }
                 None => {
                     tree = Some(node);
@@ -213,7 +223,8 @@ impl<'a> Parser<'a> {
 
         let mut fn_node = ASTnode::new_unary(
             ASTop::FUNCTION,
-            tree.unwrap_or_else(|| ASTnode::new_noop()), // TODO: Make this return ASTop::RETURN by default
+            tree.unwrap_or_else(|| ASTnode::new_noop()),
+            DataType::NONE,
         );
 
         fn_node.symtable_entry = Some(sym);
@@ -238,14 +249,14 @@ impl<'a> Parser<'a> {
                         "Empty return statements are not allowed in non-void functions.".into(),
                     );
                 }
-                ASTnode::new_leaf(ASTop::RETURN, 0)
+                ASTnode::new_leaf(ASTop::RETURN, 0, DataType::NONE)
             }
             false => {
                 if ret_type == DataType::VOID {
                     return Err("Unable to return values from void functions.".into());
                 }
                 let binary_node = self.expr_by_precedence(0)?;
-                ASTnode::new_unary(ASTop::RETURN, binary_node)
+                ASTnode::new_unary(ASTop::RETURN, binary_node, DataType::NONE)
             }
         };
 
@@ -336,7 +347,12 @@ mod tests {
 
         let expected = ASTnode::new_unary(
             ASTop::FUNCTION,
-            ASTnode::new_unary(ASTop::RETURN, ASTnode::new_leaf(ASTop::INTLIT, 1)),
+            ASTnode::new_unary(
+                ASTop::RETURN,
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
+                DataType::NONE,
+            ),
+            DataType::NONE,
         );
         match_ast_node(Some(&expr), expected);
         match parser.global_symbol_table.get("main") {
@@ -378,7 +394,12 @@ mod tests {
 
         let expected = ASTnode::new_unary(
             ASTop::FUNCTION,
-            ASTnode::new_unary(ASTop::RETURN, ASTnode::new_leaf(ASTop::INTLIT, 1)),
+            ASTnode::new_unary(
+                ASTop::RETURN,
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
+                DataType::NONE,
+            ),
+            DataType::NONE,
         );
         match_ast_node(Some(&expr), expected);
         match parser.global_symbol_table.get("test") {
@@ -409,7 +430,12 @@ mod tests {
 
         let expected = ASTnode::new_unary(
             ASTop::FUNCTION,
-            ASTnode::new_unary(ASTop::RETURN, ASTnode::new_leaf(ASTop::INTLIT, 1)),
+            ASTnode::new_unary(
+                ASTop::RETURN,
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
+                DataType::NONE,
+            ),
+            DataType::NONE,
         );
         match_ast_node(Some(&expr), expected);
         match parser.global_symbol_table.get("test") {
