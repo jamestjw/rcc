@@ -4,8 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::parser::{ASTnode, ASTop};
-use crate::parser::{SymPosition, SymbolTableEntry};
+use crate::parser::{ASTnode, ASTop, DataType, SymPosition, SymbolTableEntry};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -16,13 +15,20 @@ use std::rc::Rc;
 pub mod x86_64;
 
 pub struct Register {
-    pub name: String,
+    quad_name: String,
+    long_name: String,
+    byte_name: String,
     free: bool,
 }
 
 impl Register {
-    fn new(name: String) -> Register {
-        Self { name, free: true }
+    fn new(quad_name: String, long_name: String, byte_name: String) -> Register {
+        Self {
+            quad_name,
+            long_name,
+            byte_name,
+            free: true,
+        }
     }
     fn free(&mut self) {
         if self.free {
@@ -42,9 +48,8 @@ pub trait Generator {
     fn add(&mut self, r1: usize, r2: usize) -> usize;
     fn minus(&mut self, r1: usize, r2: usize) -> usize;
     fn multiply(&mut self, r1: usize, r2: usize) -> usize;
-    fn divide(&mut self, r1: usize, r2: usize) -> usize;
-    fn print(&mut self, r1: usize);
-    fn load_glob_var(&mut self, sym: &SymbolTableEntry) -> usize;
+    fn divide(&mut self, r1: usize, r2: usize, data_size: u8) -> usize;
+    fn load_var(&mut self, sym: &SymbolTableEntry) -> usize;
     fn assign_glob_var(&mut self, sym: &SymbolTableEntry, r: usize) -> usize;
     fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
     fn preamble(&mut self);
@@ -55,7 +60,8 @@ pub trait Generator {
     fn funccall(&mut self, fn_name: &str, num_params: usize) -> usize;
     fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
     fn set_sym_positions(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
-    fn move_to_position(&mut self, r: usize, posn: &SymPosition);
+    fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u8);
+    fn data_type_to_size(&self, data_type: DataType) -> u8;
 }
 
 // Generates the code for the ASTnode,
@@ -91,16 +97,18 @@ pub fn generate_code_for_node(
         }
     }
 
+    let data_size = generator.data_type_to_size(node.data_type);
+
     match node.op {
         ASTop::INTLIT => Some(generator.load_integer(node.int_value)),
         ASTop::ADD => Some(generator.add(left_reg?, right_reg?)),
         ASTop::MINUS => Some(generator.minus(left_reg?, right_reg?)),
         ASTop::MULTIPLY => Some(generator.multiply(left_reg?, right_reg?)),
-        ASTop::DIVIDE => Some(generator.divide(left_reg?, right_reg?)),
+        ASTop::DIVIDE => Some(generator.divide(left_reg?, right_reg?, data_size)),
         ASTop::IDENT => {
             if node.rvalue {
                 let sym = node.symtable_entry.as_ref().unwrap().borrow();
-                Some(generator.load_glob_var(&sym))
+                Some(generator.load_var(&sym))
             } else {
                 // In cases where an IDENT is not used as a left-value,
                 // the parent node will take care of what needs to be done.
@@ -179,6 +187,7 @@ fn generate_code_for_funccall_param(
 ) -> u8 {
     match &param_node.right {
         Some(n) => {
+            let data_size = generator.data_type_to_size(n.data_type);
             let r = generate_code_for_node(generator, n);
             match r {
                 Some(r) => {
@@ -187,6 +196,7 @@ fn generate_code_for_funccall_param(
                     generator.move_to_position(
                         r,
                         &param_node.symtable_entry.as_ref().unwrap().borrow().posn,
+                        data_size,
                     );
                 }
                 None => {

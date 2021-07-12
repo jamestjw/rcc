@@ -47,33 +47,43 @@ impl Generator_x86_64 {
             // for x86-64
             // TODO: Support more registers
             registers: vec![
-                Register::new(String::from("r10")),
-                Register::new(String::from("r11")),
-                Register::new(String::from("r12")),
-                Register::new(String::from("r13")),
+                Register::new(
+                    String::from("r10"),
+                    String::from("r10d"),
+                    String::from("r10b"),
+                ),
+                Register::new(
+                    String::from("r11"),
+                    String::from("r11d"),
+                    String::from("r11b"),
+                ),
+                Register::new(
+                    String::from("r12"),
+                    String::from("r12d"),
+                    String::from("r12b"),
+                ),
+                Register::new(
+                    String::from("r13"),
+                    String::from("r13d"),
+                    String::from("r13b"),
+                ),
             ],
         }
     }
 
     fn reg_name(&self, i: usize) -> String {
-        self.registers[i].name.to_string()
+        self.registers[i].quad_name.clone()
     }
 
     fn reg_name_for_size(&self, i: usize, data_size: u8) -> String {
-        let mut name = self.registers[i].name.to_string();
         match data_size {
-            1 => {
-                name.push('b');
-            }
-            4 => {
-                name.push('d');
-            }
-            8 => {}
+            1 => self.registers[i].byte_name.clone(),
+            4 => self.registers[i].long_name.clone(),
+            8 => self.registers[i].quad_name.clone(),
             _ => {
                 panic!("Invalid size passed to reg_name.")
             }
         }
-        name
     }
 
     fn gen_binary_op(&mut self, op_str: &str, op1: Operand, op2: Operand) {
@@ -148,11 +158,12 @@ impl Generator for Generator_x86_64 {
         self.free_register(r2);
         r1
     }
-    fn divide(&mut self, r1: usize, r2: usize) -> usize {
+
+    fn divide(&mut self, r1: usize, r2: usize, data_size: u8) -> usize {
         // Move dividend to rax
         self.gen_binary_op(
-            "movq",
-            Operand::Reg(self.reg_name(r1)),
+            move_signex_op(data_size),
+            Operand::Reg(self.reg_name_for_size(r1, data_size)),
             Operand::Reg("rax".into()),
         );
 
@@ -173,28 +184,9 @@ impl Generator for Generator_x86_64 {
         r1
     }
 
-    fn print(&mut self, r1: usize) {
-        self.gen_binary_op(
-            "movq",
-            Operand::Reg(self.reg_name(r1)),
-            Operand::Reg("rdi".into()),
-        );
-        self.gen_unary_op("call", Operand::Func("printint".into()));
-        self.free_register(r1);
-    }
-
-    fn load_glob_var(&mut self, sym: &SymbolTableEntry) -> usize {
+    fn load_var(&mut self, sym: &SymbolTableEntry) -> usize {
         let r = self.alloc_register();
-        // TODO: Investigate how relevant it is to use the right
-        // instruction here. For now this doesn't work since we
-        // don't know the size of the first operand
-        // let op_name = match sym.size {
-        //     1 => "movzbq",
-        //     4 => "movslq",
-        //     8 => "movq",
-        //     _ => panic!("Invalid size in assign_glob_var."),
-        // };
-        let op_name = "movq";
+        let op_name = move_signex_op(8);
         self.gen_binary_op(
             op_name,
             Operand::RawString(sym_posn_to_string(&sym.posn)),
@@ -367,18 +359,27 @@ impl Generator for Generator_x86_64 {
 
     // TODO: The behaviour of this method is only coherent if we invoke this
     // before function calls. Perhaps the name of the method should be changed.
-    fn move_to_position(&mut self, r: usize, posn: &SymPosition) {
+    fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u8) {
         if let SymPosition::PositiveBPOffset(_) = posn {
+            // TODO: Push with right datasize
             self.gen_unary_op("pushq", Operand::Reg(self.reg_name(r)));
         } else {
             self.gen_binary_op(
-                "movq",
-                Operand::Reg(self.reg_name(r)),
+                move_signex_op(data_size),
+                Operand::Reg(self.reg_name_for_size(r, data_size)),
                 Operand::RawString(sym_posn_to_string(posn)),
             );
         }
 
         self.free_register(r);
+    }
+
+    fn data_type_to_size(&self, data_type: DataType) -> u8 {
+        match data_type {
+            DataType::CHAR => 1,
+            DataType::INT => 4,
+            _ => 0,
+        }
     }
 }
 
@@ -392,3 +393,47 @@ fn sym_posn_to_string(posn: &SymPosition) -> String {
         }
     }
 }
+
+fn move_signex_op(data_size: u8) -> &'static str {
+    match data_size {
+        1 => "movsbq",
+        4 => "movslq",
+        8 => "movq",
+        _ => {
+            panic!("Unknown size: {} in move_signex_op", data_size);
+        }
+    }
+}
+
+// TODO: Seems like this is not necessary for now
+// Returns the op name and the size that was matched, some sizes
+// default to operators of a different size.
+// fn add_op(data_size: u8) -> (&'static str, u8) {
+//     match data_size {
+//         1..=4 => ("addl", 4),
+//         8 => ("addq", 8),
+//         _ => {
+//             panic!("Unknown size: {} in add_op", data_size);
+//         }
+//     }
+// }
+
+// fn sub_op(data_size: u8) -> (&'static str, u8) {
+//     match data_size {
+//         1..=4 => ("subl", 4),
+//         8 => ("subq", 8),
+//         _ => {
+//             panic!("Unknown size: {} in sub_op", data_size);
+//         }
+//     }
+// }
+
+// fn mul_op(data_size: u8) -> (&'static str, u8) {
+//     match data_size {
+//         1..=4 => ("imull", 4),
+//         8 => ("imulq", 8),
+//         _ => {
+//             panic!("Unknown size: {} in mul_op", data_size);
+//         }
+//     }
+// }
