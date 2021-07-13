@@ -20,6 +20,7 @@ enum Operand {
     Reg(String),
     Func(String),
     RawString(String),
+    Addr(String),
 }
 
 impl fmt::Display for Operand {
@@ -29,6 +30,7 @@ impl fmt::Display for Operand {
             Operand::Reg(s) => write!(f, "%{}", s),
             Operand::Func(s) => write!(f, "{}@PLT", s),
             Operand::RawString(s) => write!(f, "{}", s),
+            Operand::Addr(s) => write!(f, "(%{})", s),
         }
     }
 }
@@ -210,16 +212,44 @@ impl Generator for Generator_x86_64 {
         r
     }
 
+    fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u8) -> usize {
+        let op_name = match data_size {
+            1 => "movb",
+            4 => "movl",
+            8 => "movq",
+            _ => panic!("Invalid size in assign_to_addr."),
+        };
+        self.gen_binary_op(
+            op_name,
+            Operand::Reg(self.reg_name_for_size(r2, data_size)),
+            Operand::Addr(self.reg_name_for_size(r1, data_size)),
+        );
+        self.free_register(r2);
+        r1
+    }
+
     fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
         for (sym_name, entry) in symtable {
             if entry.borrow().sym_type != SymType::VARIABLE {
                 continue;
             }
+            self.output_str
+                .push_str(&format!("\t.globl  {0}\n\t.bss\n", sym_name,));
+
+            let size = entry.borrow().size;
+
+            match size {
+                0..=3 => {}
+                4..=7 => {
+                    self.output_str.push_str(&format!("\t.align 4\n"));
+                }
+                8..=u8::MAX => {
+                    self.output_str.push_str(&format!("\t.align 8\n"));
+                }
+            }
+
             self.output_str.push_str(&format!(
-                r#"    .globl  {0}
-    .bss
-    .align 4
-    .type   {0}, @object
+                r#"    .type   {0}, @object
     .size   {0}, {1}
 {0}:
     .zero   {1}
@@ -307,13 +337,14 @@ impl Generator for Generator_x86_64 {
         return r;
     }
 
-    fn set_sym_positions(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
+    fn preprocess_symbols(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
         for (sym_name, entry) in symtable {
             let mut entry = entry.borrow_mut();
             match entry.sym_type {
                 SymType::VARIABLE => {
                     // Global variables can be referred directly to by their names
                     entry.posn = SymPosition::Label(sym_name.clone());
+                    entry.size = symbol_size(entry.data_type);
                 }
                 SymType::FUNCTION => {
                     // Functions can be referred directly to by their names
@@ -331,6 +362,9 @@ impl Generator for Generator_x86_64 {
                     loop {
                         match member_node {
                             Some(node) => {
+                                let mem_size = symbol_size(node.borrow().data_type);
+                                node.borrow_mut().size = mem_size;
+
                                 if i < PARAM_REGS.len() {
                                     node.borrow_mut().posn =
                                         SymPosition::Reg(PARAM_REGS[i].to_string());
@@ -381,6 +415,27 @@ impl Generator for Generator_x86_64 {
             _ => 0,
         }
     }
+
+    // TODO: Customise based on size
+    fn load_from_addr(&mut self, r: usize, data_size: u8) -> usize {
+        let op = move_signex_op(data_size);
+        self.gen_binary_op(
+            op,
+            Operand::Addr(self.reg_name(r)),
+            Operand::Reg(self.reg_name(r)),
+        );
+        r
+    }
+
+    fn load_addr(&mut self, sym: &SymbolTableEntry) -> usize {
+        let r = self.alloc_register();
+        self.gen_binary_op(
+            "leaq",
+            Operand::RawString(sym_posn_to_string(&sym.posn)),
+            Operand::Reg(self.reg_name(r)),
+        );
+        r
+    }
 }
 
 fn sym_posn_to_string(posn: &SymPosition) -> String {
@@ -402,6 +457,17 @@ fn move_signex_op(data_size: u8) -> &'static str {
         _ => {
             panic!("Unknown size: {} in move_signex_op", data_size);
         }
+    }
+}
+
+fn symbol_size(data_type: DataType) -> u8 {
+    match data_type {
+        DataType::INT => 4,
+        DataType::CHAR => 1,
+        DataType::INTPTR => 8,
+        DataType::CHARPTR => 8,
+        DataType::VOID => 0,
+        DataType::NONE => 0,
     }
 }
 

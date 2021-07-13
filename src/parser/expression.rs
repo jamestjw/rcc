@@ -10,7 +10,42 @@ use std::error::Error;
 impl<'a> Parser<'a> {
     // Pratt parser inspired by https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
     pub fn expr_by_precedence(&mut self, min_bp: u8) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        let mut left = self.primary_expr()?;
+        let tok_type = match &self.current_token {
+            Some(tok) => match tok.token_type {
+                TokenType::EOF => {
+                    return Err("Syntax error, unnexpected end of input stream.".into())
+                }
+                _ => tok.token_type,
+            },
+            None => panic!("Ran out of tokens to parse in expr_by_precedence."),
+        };
+
+        // Handle prefix
+        let mut left = match prefix_binding_power(tok_type) {
+            Some(((), r_bp)) => {
+                let op = token_type_to_prefix_op(tok_type);
+                self.consume()?;
+                let right = self.expr_by_precedence(r_bp)?;
+
+                let data_type = match op {
+                    ASTop::DEREF => pointer_to(right.data_type)?,
+                    ASTop::ADDR => to_pointer(right.data_type)?,
+                    _ => right.data_type,
+                };
+
+                if op == ASTop::ADDR {
+                    if right.op != ASTop::IDENT {
+                        return Err("May only take address of a variable.".into());
+                    }
+                    let mut node = ASTnode::new_leaf(op, 0, data_type);
+                    node.symtable_entry = right.symtable_entry;
+                    node
+                } else {
+                    ASTnode::new_unary(op, right, data_type)
+                }
+            }
+            None => self.primary_expr()?,
+        };
 
         loop {
             let op_tok_type = match &self.current_token {
@@ -243,6 +278,15 @@ fn infix_binding_power(op: TokenType) -> Option<(u8, u8)> {
     Some(res)
 }
 
+fn prefix_binding_power(op: TokenType) -> Option<((), u8)> {
+    let res = match op {
+        TokenType::STAR => ((), 90),
+        TokenType::AMPERSAND => ((), 90),
+        _ => return None,
+    };
+    Some(res)
+}
+
 fn postfix_binding_power(op: TokenType) -> Option<(u8, ())> {
     let res = match op {
         // For function calls
@@ -269,6 +313,16 @@ fn token_type_to_postfix_op(token_type: TokenType) -> ASTop {
     match token_type {
         _ => {
             panic!("Unknown postfix op from token type: {}", token_type);
+        }
+    }
+}
+
+fn token_type_to_prefix_op(token_type: TokenType) -> ASTop {
+    match token_type {
+        TokenType::STAR => ASTop::DEREF,
+        TokenType::AMPERSAND => ASTop::ADDR,
+        _ => {
+            panic!("Unknown prefix op from token type: {}", token_type);
         }
     }
 }
@@ -435,7 +489,7 @@ mod tests {
     fn parse_simple_assignment() {
         let mut scanner = Scanner::new_from_string(String::from("x = 5;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE, 4);
+        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE, 0);
         let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
@@ -462,7 +516,7 @@ mod tests {
         let mut scanner = Scanner::new_from_string(String::from("x = 'c';"));
         let mut parser = Parser::new(&mut scanner).unwrap();
         let sym =
-            parser.add_global_symbol("x".to_string(), DataType::CHAR, 0, SymType::VARIABLE, 4);
+            parser.add_global_symbol("x".to_string(), DataType::CHAR, 0, SymType::VARIABLE, 0);
         let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
@@ -493,14 +547,14 @@ mod tests {
             DataType::INT,
             0,
             SymType::FUNCTION,
-            4,
+            0,
         );
         let func_param_sym = SymbolTableEntry::new(
             // TODO: Parse datatype
             DataType::INT,
             0,
             "param_1".to_string(),
-            4,
+            0,
             SymType::VARIABLE,
             SymClass::PARAM,
         );
@@ -543,7 +597,7 @@ mod tests {
             DataType::INT,
             0,
             SymType::FUNCTION,
-            4,
+            0,
         );
         let expr = parser.expr_by_precedence(0)?;
 
@@ -580,7 +634,7 @@ mod tests {
             DataType::INT,
             0,
             "param_1".to_string(),
-            4,
+            0,
             SymType::VARIABLE,
             SymClass::PARAM,
         );
@@ -591,7 +645,7 @@ mod tests {
             DataType::INT,
             0,
             SymType::VARIABLE,
-            4,
+            0,
         );
         let expr = parser.expr_by_precedence(0)?;
 
@@ -647,7 +701,7 @@ mod tests {
             DataType::INT,
             0,
             "param_1".to_string(),
-            4,
+            0,
             SymType::VARIABLE,
             SymClass::PARAM,
         );
@@ -657,7 +711,7 @@ mod tests {
             DataType::INT,
             0,
             "param_2".to_string(),
-            4,
+            0,
             SymType::VARIABLE,
             SymClass::PARAM,
         );
@@ -668,7 +722,7 @@ mod tests {
             DataType::INT,
             0,
             SymType::VARIABLE,
-            4,
+            0,
         );
         let expr = parser.expr_by_precedence(0)?;
 
@@ -729,6 +783,120 @@ mod tests {
                 .unwrap()
         ));
 
+        Ok(())
+    }
+
+    #[test]
+    fn parse_bin_expr_with_prefix_deref_assign() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("*x = 8;"));
+        let mut parser = Parser::new(&mut scanner)?;
+        let sym =
+            parser.add_global_symbol("x".to_string(), DataType::INTPTR, 0, SymType::VARIABLE, 0);
+        let expr = parser.expr_by_precedence(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_unary(
+                ASTop::DEREF,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INTPTR),
+                DataType::INT,
+            ),
+            ASTnode::new_leaf(ASTop::INTLIT, 8, DataType::CHAR),
+            DataType::INT,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        match expr.left.unwrap().left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym, &s));
+            }
+            None => {
+                panic!("ASTnode does not contain reference to symtable entry.");
+            }
+        };
+        Ok(())
+    }
+
+    #[test]
+    fn parse_bin_expr_with_deref_as_rvalue() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("x = *y;"));
+        let mut parser = Parser::new(&mut scanner)?;
+        let sym_x =
+            parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE, 0);
+        let sym_y =
+            parser.add_global_symbol("y".to_string(), DataType::INTPTR, 0, SymType::VARIABLE, 0);
+        let expr = parser.expr_by_precedence(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_unary(
+                ASTop::DEREF,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INTPTR),
+                DataType::INT,
+            ),
+            DataType::INT,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        match expr.left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym_x, &s));
+            }
+            None => {
+                panic!("Left ASTnode does not contain reference to symtable entry.");
+            }
+        };
+
+        match expr.right.unwrap().left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym_y, &s));
+            }
+            None => {
+                panic!("Right ASTnode does not contain reference to symtable entry.");
+            }
+        };
+        Ok(())
+    }
+
+    #[test]
+    fn parse_bin_expr_with_address_taking_of_variable() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("x = &y;"));
+        let mut parser = Parser::new(&mut scanner)?;
+        let sym_x =
+            parser.add_global_symbol("x".to_string(), DataType::INTPTR, 0, SymType::VARIABLE, 0);
+        let sym_y =
+            parser.add_global_symbol("y".to_string(), DataType::INT, 0, SymType::VARIABLE, 0);
+        let expr = parser.expr_by_precedence(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INTPTR),
+            ASTnode::new_leaf(ASTop::ADDR, 0, DataType::INTPTR),
+            DataType::INTPTR,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        match expr.left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym_x, &s));
+            }
+            None => {
+                panic!("Left ASTnode does not contain reference to symtable entry.");
+            }
+        };
+
+        match expr.right.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym_y, &s));
+            }
+            None => {
+                panic!("Right ASTnode does not contain reference to symtable entry.");
+            }
+        };
         Ok(())
     }
 }

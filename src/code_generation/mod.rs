@@ -50,7 +50,10 @@ pub trait Generator {
     fn multiply(&mut self, r1: usize, r2: usize) -> usize;
     fn divide(&mut self, r1: usize, r2: usize, data_size: u8) -> usize;
     fn load_var(&mut self, sym: &SymbolTableEntry) -> usize;
+    fn load_from_addr(&mut self, r: usize, data_size: u8) -> usize;
+    fn load_addr(&mut self, sym: &SymbolTableEntry) -> usize;
     fn assign_glob_var(&mut self, sym: &SymbolTableEntry, r: usize) -> usize;
+    fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u8) -> usize;
     fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
     fn preamble(&mut self);
     fn postamble(&mut self);
@@ -59,7 +62,8 @@ pub trait Generator {
     fn return_from_func(&mut self, label: &str, r: Option<usize>);
     fn funccall(&mut self, fn_name: &str, num_params: usize) -> usize;
     fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
-    fn set_sym_positions(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
+    // Set symbol position and sizes
+    fn preprocess_symbols(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
     fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u8);
     fn data_type_to_size(&self, data_type: DataType) -> u8;
 }
@@ -101,30 +105,62 @@ pub fn generate_code_for_node(
 
     match node.op {
         ASTop::INTLIT => Some(generator.load_integer(node.int_value)),
-        ASTop::ADD => Some(generator.add(left_reg?, right_reg?)),
-        ASTop::MINUS => Some(generator.minus(left_reg?, right_reg?)),
-        ASTop::MULTIPLY => Some(generator.multiply(left_reg?, right_reg?)),
-        ASTop::DIVIDE => Some(generator.divide(left_reg?, right_reg?, data_size)),
+        ASTop::ADD => Some(generator.add(left_reg.unwrap(), right_reg.unwrap())),
+        ASTop::MINUS => Some(generator.minus(left_reg.unwrap(), right_reg.unwrap())),
+        ASTop::MULTIPLY => Some(generator.multiply(left_reg.unwrap(), right_reg.unwrap())),
+        ASTop::DIVIDE => Some(generator.divide(left_reg.unwrap(), right_reg.unwrap(), data_size)),
         ASTop::IDENT => {
             if node.rvalue {
                 let sym = node.symtable_entry.as_ref().unwrap().borrow();
                 Some(generator.load_var(&sym))
             } else {
-                // In cases where an IDENT is not used as a left-value,
+                // In cases where an IDENT is used as a left-value,
                 // the parent node will take care of what needs to be done.
                 None
             }
         }
+        ASTop::DEREF => {
+            if node.rvalue {
+                Some(generator.load_from_addr(left_reg.unwrap(), data_size))
+            } else {
+                // In cases where an IDENT is used as a left-value,
+                // the parent node will take care of what needs to be done.
+                left_reg
+            }
+        }
         ASTop::ASSIGN => {
-            let sym = node
-                .left
-                .as_ref()
-                .unwrap()
-                .symtable_entry
-                .as_ref()
-                .unwrap()
-                .borrow();
-            Some(generator.assign_glob_var(&sym, right_reg?))
+            // TODO: Consider putting this in a different function.
+
+            match &node.left {
+                Some(left) => match left.op {
+                    ASTop::IDENT => {
+                        let sym = node
+                            .left
+                            .as_ref()
+                            .unwrap()
+                            .symtable_entry
+                            .as_ref()
+                            .unwrap()
+                            .borrow();
+
+                        Some(generator.assign_glob_var(&sym, right_reg.unwrap()))
+                    }
+                    // TODO: Pass in the right size
+                    ASTop::DEREF => {
+                        Some(generator.assign_to_addr(left_reg.unwrap(), right_reg.unwrap(), 8))
+                    }
+                    _ => {
+                        panic!("Unable to assign to {}.", left.op.name());
+                    }
+                },
+                None => {
+                    panic!("Left node should not be empty for ASTop::ASSIGN.");
+                }
+            }
+        }
+        ASTop::ADDR => {
+            let sym = node.symtable_entry.as_ref().unwrap().borrow();
+            Some(generator.load_addr(&sym))
         }
         ASTop::RETURN => {
             generator.return_from_func(node.label.as_ref()?, left_reg);

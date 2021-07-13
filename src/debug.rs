@@ -13,6 +13,16 @@ pub fn print_tree(node: &ASTnode, indentation_count: u8) {
         ASTop::INTLIT => {
             println!(": {}", node.int_value);
         }
+        ASTop::DEREF => {
+            println!(" rvalue:{}", node.rvalue);
+        }
+        ASTop::ADDR => {
+            println!(
+                ": {} rvalue:{}",
+                node.symtable_entry.as_ref().unwrap().borrow().name,
+                node.rvalue
+            );
+        }
         ASTop::IDENT => {
             println!(
                 ": {} rvalue:{}",

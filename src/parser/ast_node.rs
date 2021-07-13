@@ -24,8 +24,9 @@ enum_str! {
         RETURN,
         FUNCCALL,
         FUNCPARAM,
+        DEREF,
+        ADDR,
     }
-
 }
 
 #[derive(Debug)]

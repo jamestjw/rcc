@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::code_generation::generate_label_for_function;
-use std::convert::TryFrom;
 
 impl<'a> Parser<'a> {
     pub fn parse_global_declarations(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
@@ -61,7 +60,7 @@ impl<'a> Parser<'a> {
     // Parse a global declaration and maybe return an ASTnode.
     // Global var declarations do not yield ASTNodes
     fn parse_global_declaration(&mut self) -> Result<Option<Box<ASTnode>>, Box<dyn Error>> {
-        let data_type = DataType::try_from(self.parse_type()?)?;
+        let data_type = self.parse_type()?;
         let ident = self.match_token(TokenType::IDENT)?;
 
         match &self.current_token {
@@ -95,7 +94,7 @@ impl<'a> Parser<'a> {
             return Err("Unable to declare variables with void type.".into());
         }
 
-        self.add_global_symbol(ident.lexeme, data_type, 0, SymType::VARIABLE, 4);
+        self.add_global_symbol(ident.lexeme, data_type, 0, SymType::VARIABLE, 0);
 
         match &self.current_token {
             Some(token) => {
@@ -122,7 +121,7 @@ impl<'a> Parser<'a> {
     // We require these parameters as these tokens should have
     // been scanned prior to invocation of this function
     fn parse_func_param_declaration(&mut self) -> Result<SymbolTableEntry, Box<dyn Error>> {
-        let data_type = DataType::try_from(self.parse_type()?)?;
+        let data_type = self.parse_type()?;
 
         if data_type == DataType::VOID {
             return Err("Unable to define function parameters with void type.".into());
@@ -135,7 +134,7 @@ impl<'a> Parser<'a> {
             data_type,
             0,
             ident.lexeme.clone(),
-            4,
+            0,
             SymType::VARIABLE,
             SymClass::PARAM,
         );

@@ -28,6 +28,7 @@ enum_str! {
         RETURN,
         BANG,
         COMMA,
+        AMPERSAND,
     }
 }
 
@@ -53,6 +54,7 @@ impl fmt::Display for TokenType {
             TokenType::RETURN => write!(f, "return"),
             TokenType::BANG => write!(f, "!"),
             TokenType::COMMA => write!(f, ","),
+            TokenType::AMPERSAND => write!(f, "&"),
         }
     }
 }

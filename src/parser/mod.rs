@@ -15,6 +15,7 @@ use crate::scanner::Scanner;
 use crate::token::{Token, TokenType};
 pub use ast_node::*;
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::rc::Rc;
 
 pub use symbol_table::*;
@@ -81,24 +82,55 @@ impl<'a> Parser<'a> {
     }
 
     // Parses the next token as a type, e.g. INT, VOID
-    pub fn parse_type(&mut self) -> Result<TokenType, Box<dyn Error>> {
-        let res: Result<TokenType, Box<dyn Error>> = match &self.current_token {
+    pub fn parse_type(&mut self) -> Result<DataType, Box<dyn Error>> {
+        let mut res = match &self.current_token {
             Some(tok) => match tok.token_type {
-                TokenType::CHAR | TokenType::INT | TokenType::VOID => Ok(tok.token_type),
-                _ => Err(format!(
-                    "Expected data type but encountered {} instead.",
-                    tok.token_type
-                )
-                .into()),
+                TokenType::CHAR | TokenType::INT | TokenType::VOID => {
+                    DataType::try_from(tok.token_type)?
+                }
+                _ => {
+                    return Err(format!(
+                        "Expected data type but encountered {} instead.",
+                        tok.token_type
+                    )
+                    .into());
+                }
             },
-            None => Err("Unexpected end of input.".into()),
+            None => {
+                return Err("Unexpected end of input.".into());
+            }
         };
 
-        if res.is_ok() {
-            self.consume()?;
+        self.consume()?;
+
+        let indirection_count = self.parse_indirection()?;
+
+        for _ in 0..indirection_count {
+            res = to_pointer(res)?;
         }
 
-        res
+        Ok(res)
+    }
+
+    fn parse_indirection(&mut self) -> Result<u8, Box<dyn Error>> {
+        let mut indirection_count = 0;
+
+        loop {
+            match &self.current_token {
+                Some(tok) => match tok.token_type {
+                    TokenType::STAR => {
+                        indirection_count += 1;
+                        self.consume()?;
+                    }
+                    _ => {
+                        break;
+                    }
+                },
+                None => return Err("Unexpected end of input.".into()),
+            };
+        }
+
+        Ok(indirection_count)
     }
 
     pub fn add_global_symbol(
@@ -120,6 +152,25 @@ impl<'a> Parser<'a> {
         )));
         self.global_symbol_table.insert(lexeme, Rc::clone(&sym));
         sym
+    }
+}
+
+fn to_pointer(data_type: DataType) -> Result<DataType, String> {
+    match data_type {
+        DataType::INT => Ok(DataType::INTPTR),
+        DataType::CHAR => Ok(DataType::CHARPTR),
+        _ => Err(format!(
+            "Unable to convert {} type to a pointer.",
+            data_type.name()
+        )),
+    }
+}
+
+fn pointer_to(data_type: DataType) -> Result<DataType, String> {
+    match data_type {
+        DataType::INTPTR => Ok(DataType::INT),
+        DataType::CHARPTR => Ok(DataType::CHAR),
+        _ => Err(format!("{} is not a valid pointer type.", data_type.name())),
     }
 }
 
@@ -155,7 +206,7 @@ mod tests {
 
         match res {
             Ok(t) => {
-                assert_eq!(t, TokenType::INT);
+                assert_eq!(t, DataType::INT);
 
                 // Check that the INT token has been consumed
                 assert_eq!(parser.current_token.unwrap().token_type, TokenType::IDENT);

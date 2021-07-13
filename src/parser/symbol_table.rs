@@ -8,14 +8,21 @@ use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::rc::Rc;
 
+use crate::enum_str;
 use crate::token::TokenType;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub enum DataType {
-    NONE, // To be used there is no specific type
-    INT,
-    CHAR,
-    VOID,
+// TODO: Is there a better way to handle pointers?
+// Handling multiple levels of indirection will be complicated otherwise.
+enum_str! {
+    #[derive(Debug, PartialEq, Copy, Clone)]
+    pub enum DataType {
+        NONE, // To be used there is no specific type
+        INT,
+        INTPTR,
+        CHAR,
+        CHARPTR,
+        VOID,
+    }
 }
 
 impl TryFrom<TokenType> for DataType {

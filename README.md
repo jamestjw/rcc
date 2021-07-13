@@ -16,6 +16,8 @@ I will try to document the progress of this project as best as I can. I will mos
 
 10/7/2021 - Support calling functions with multiple parameters according to x86-64 C calling convention.
 
+14/7/2021 - Add support for prefix operators. Implement pointer types and support taking addresses of variables and the dereferencing of pointers.
+
 ## Tests
 To run all unit tests only
 ``` bash

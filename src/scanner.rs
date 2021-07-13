@@ -54,6 +54,7 @@ impl Scanner {
                 '{' => TokenType::LBRACE,
                 '}' => TokenType::RBRACE,
                 ',' => TokenType::COMMA,
+                '&' => TokenType::AMPERSAND,
                 '0'..='9' => {
                     int_value = self.scan_int(c) as i32;
                     TokenType::INTLIT
