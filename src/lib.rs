@@ -8,6 +8,7 @@ pub mod code_generation;
 pub mod debug;
 pub mod parser;
 pub mod scanner;
+pub mod string_table;
 pub mod token;
 
 use crate::parser::{DataType, SymClass, SymType, SymbolTableEntry};
@@ -85,6 +86,22 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         SymClass::PARAM,
     ));
 
+    let printstr_sym = parser.add_global_symbol(
+        "printstr".to_string(),
+        DataType::VOID,
+        0,
+        SymType::FUNCTION,
+        0,
+    );
+    printstr_sym.borrow_mut().add_member(SymbolTableEntry::new(
+        DataType::CHARPTR,
+        0,
+        "s".to_string(),
+        0,
+        SymType::VARIABLE,
+        SymClass::PARAM,
+    ));
+
     let stmts = match parser.parse_global_declarations() {
         Ok(stmt) => stmt,
         Err(err) => {
@@ -102,6 +119,7 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
     let mut generator = code_generation::x86_64::Generator_x86_64::new();
     generator.preprocess_symbols(&parser.global_symbol_table);
     generator.gen_glob_syms(&parser.global_symbol_table);
+    generator.gen_strlits(&scanner.string_table);
     generator.preamble();
     code_generation::generate_code_for_node(&mut generator, &stmts);
 

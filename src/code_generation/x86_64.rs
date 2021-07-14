@@ -17,6 +17,7 @@ const PARAM_REGS: [&'static str; 6] = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
 
 enum Operand {
     Int(i32),
+    Strlit(String),
     Reg(String),
     Func(String),
     RawString(String),
@@ -27,6 +28,7 @@ impl fmt::Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Operand::Int(i) => write!(f, "${}", i),
+            Operand::Strlit(i) => write!(f, "{}(%rip)", i),
             Operand::Reg(s) => write!(f, "%{}", s),
             Operand::Func(s) => write!(f, "{}@PLT", s),
             Operand::RawString(s) => write!(f, "{}", s),
@@ -129,6 +131,28 @@ impl Generator for Generator_x86_64 {
         self.gen_binary_op("movq", Operand::Int(i), Operand::Reg(self.reg_name(r)));
 
         r
+    }
+
+    fn load_strlit(&mut self, id: usize) -> usize {
+        let r = self.alloc_register();
+        self.gen_binary_op(
+            "leaq",
+            Operand::Strlit(str_label(id)),
+            Operand::Reg(self.reg_name(r)),
+        );
+
+        r
+    }
+
+    fn gen_strlits(&mut self, string_table: &StringTable) {
+        self.output_str.push_str(&format!("\t.section .rodata\n"));
+        for id in 0..string_table.len() {
+            self.output_str.push_str(&format!(
+                "{}:\n\t.string \"{}\"\n",
+                str_label(id),
+                string_table.get_by_id(id)
+            ));
+        }
     }
 
     fn add(&mut self, r1: usize, r2: usize) -> usize {
@@ -344,7 +368,7 @@ impl Generator for Generator_x86_64 {
                 SymType::VARIABLE => {
                     // Global variables can be referred directly to by their names
                     entry.posn = SymPosition::Label(sym_name.clone());
-                    entry.size = symbol_size(entry.data_type);
+                    entry.size = self.data_type_to_size(entry.data_type);
                 }
                 SymType::FUNCTION => {
                     // Functions can be referred directly to by their names
@@ -362,7 +386,7 @@ impl Generator for Generator_x86_64 {
                     loop {
                         match member_node {
                             Some(node) => {
-                                let mem_size = symbol_size(node.borrow().data_type);
+                                let mem_size = self.data_type_to_size(node.borrow().data_type);
                                 node.borrow_mut().size = mem_size;
 
                                 if i < PARAM_REGS.len() {
@@ -410,9 +434,12 @@ impl Generator for Generator_x86_64 {
 
     fn data_type_to_size(&self, data_type: DataType) -> u8 {
         match data_type {
-            DataType::CHAR => 1,
             DataType::INT => 4,
-            _ => 0,
+            DataType::CHAR => 1,
+            DataType::INTPTR => 8,
+            DataType::CHARPTR => 8,
+            DataType::VOID => 0,
+            DataType::NONE => 0,
         }
     }
 
@@ -460,15 +487,8 @@ fn move_signex_op(data_size: u8) -> &'static str {
     }
 }
 
-fn symbol_size(data_type: DataType) -> u8 {
-    match data_type {
-        DataType::INT => 4,
-        DataType::CHAR => 1,
-        DataType::INTPTR => 8,
-        DataType::CHARPTR => 8,
-        DataType::VOID => 0,
-        DataType::NONE => 0,
-    }
+fn str_label(id: usize) -> String {
+    format!(".LC{}", id)
 }
 
 // TODO: Seems like this is not necessary for now

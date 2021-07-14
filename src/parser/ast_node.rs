@@ -16,6 +16,7 @@ enum_str! {
         MULTIPLY,
         DIVIDE,
         INTLIT,
+        STRLIT,
         IDENT,
         ASSIGN,
         NOOP,
@@ -41,6 +42,8 @@ pub struct ASTnode {
     // The type of data contained in this node
     // DataType::NONE if this node yields nothing
     pub data_type: DataType,
+    // ID to a string table entry for string literals
+    pub string_table_id: Option<usize>,
 }
 
 impl ASTnode {
@@ -54,6 +57,7 @@ impl ASTnode {
             rvalue: false,
             label: None,
             data_type,
+            string_table_id: None,
         })
     }
 
@@ -67,6 +71,7 @@ impl ASTnode {
             rvalue: false,
             label: None,
             data_type,
+            string_table_id: None,
         })
     }
 
@@ -80,6 +85,7 @@ impl ASTnode {
             rvalue: false,
             label: None,
             data_type,
+            string_table_id: None,
         })
     }
 
@@ -98,6 +104,7 @@ impl ASTnode {
             rvalue: false,
             label: None,
             data_type,
+            string_table_id: None,
         })
     }
 
@@ -111,6 +118,7 @@ impl ASTnode {
             rvalue: false,
             label: None,
             data_type: DataType::NONE,
+            string_table_id: None,
         })
     }
 }

@@ -16,6 +16,7 @@ enum_str! {
         SLASH,
         STAR,
         INTLIT,
+        STRLIT,
         IDENT,
         LPAREN,
         RPAREN,
@@ -42,6 +43,7 @@ impl fmt::Display for TokenType {
             TokenType::SLASH => write!(f, "/"),
             TokenType::STAR => write!(f, "*"),
             TokenType::INTLIT => write!(f, "integer literal"),
+            TokenType::STRLIT => write!(f, "string literal"),
             TokenType::IDENT => write!(f, "identifier"),
             TokenType::LPAREN => write!(f, "("),
             TokenType::RPAREN => write!(f, ")"),
@@ -65,6 +67,8 @@ pub struct Token {
     // TODO: Investigate the feasibility of simply creating references to the
     // source program using Rc Strings.
     pub lexeme: String,
+    // If the token represents a STRLIT, it will contain an ID to a string table entry
+    pub string_table_id: Option<usize>,
 }
 
 impl Token {
@@ -73,6 +77,7 @@ impl Token {
             token_type,
             int_value: 0,
             lexeme: lexeme,
+            string_table_id: None,
         }
     }
 }

@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use crate::parser::{ASTnode, ASTop, DataType, SymPosition, SymbolTableEntry};
+use crate::string_table::StringTable;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -45,6 +46,7 @@ pub trait Generator {
     fn free_register(&mut self, i: usize);
     fn free_all_registers(&mut self);
     fn load_integer(&mut self, i: i32) -> usize;
+    fn load_strlit(&mut self, id: usize) -> usize;
     fn add(&mut self, r1: usize, r2: usize) -> usize;
     fn minus(&mut self, r1: usize, r2: usize) -> usize;
     fn multiply(&mut self, r1: usize, r2: usize) -> usize;
@@ -66,6 +68,7 @@ pub trait Generator {
     fn preprocess_symbols(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
     fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u8);
     fn data_type_to_size(&self, data_type: DataType) -> u8;
+    fn gen_strlits(&mut self, string_table: &StringTable);
 }
 
 // Generates the code for the ASTnode,
@@ -166,6 +169,11 @@ pub fn generate_code_for_node(
             generator.return_from_func(node.label.as_ref()?, left_reg);
             None
         }
+        ASTop::STRLIT => {
+            // This is safe as we can count on STRLITs to have a string table ID
+            Some(generator.load_strlit(node.string_table_id.unwrap()))
+        }
+
         ASTop::NOOP | ASTop::GLUE => None,
         _ => {
             panic!(

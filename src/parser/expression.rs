@@ -168,12 +168,18 @@ impl<'a> Parser<'a> {
                     Ok(node)
                 }
                 TokenType::INTLIT => {
-                    let int_value = self.match_token(TokenType::INTLIT)?.int_value;
+                    let int_value = self.consume()?.int_value;
                     let data_type = match int_value {
                         _ if int_value >= 0 && int_value < 256 => DataType::CHAR,
                         _ => DataType::INT,
                     };
                     Ok(ASTnode::new_leaf(ASTop::INTLIT, int_value, data_type))
+                }
+                TokenType::STRLIT => {
+                    let string_table_id = self.consume()?.string_table_id;
+                    let mut node = ASTnode::new_leaf(ASTop::STRLIT, 0, DataType::CHARPTR);
+                    node.string_table_id = string_table_id;
+                    Ok(node)
                 }
                 _ => Err(format!(
                     "Syntax error, expected primary expression but found '{}' instead.",

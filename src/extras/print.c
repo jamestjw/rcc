@@ -9,3 +9,7 @@ void printint(int x) {
 void printchar(char c) {
     printf("%c\n", c);
 }
+
+void printstr(char *s) {
+    printf("%s\n", s);
+}

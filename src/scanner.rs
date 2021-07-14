@@ -4,6 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+use crate::string_table::StringTable;
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -14,6 +15,7 @@ pub struct Scanner {
     input_file_chars: Box<dyn Iterator<Item = char>>,
     pub line_number: u16,
     putback_char: Option<char>,
+    pub string_table: StringTable,
 }
 
 impl Scanner {
@@ -34,6 +36,7 @@ impl Scanner {
             input_file_chars: Box::new(input_str.chars().collect::<Vec<_>>().into_iter()),
             line_number: 1,
             putback_char: None,
+            string_table: StringTable::new(),
         }
     }
 
@@ -41,6 +44,7 @@ impl Scanner {
     pub fn next_token(&mut self) -> Result<Token, Box<dyn Error>> {
         let mut int_value = 0;
         let mut lexeme = String::new();
+        let mut string_table_id = None;
         let token_type = match self.next_char() {
             Some(c) => match c {
                 '=' => TokenType::ASSIGN,
@@ -63,6 +67,10 @@ impl Scanner {
                     int_value = self.scan_char()? as i32;
                     TokenType::INTLIT
                 }
+                '"' => {
+                    string_table_id = Some(self.scan_strlit()?);
+                    TokenType::STRLIT
+                }
                 c if c.is_alphabetic() => {
                     lexeme.push_str(&self.scan_ident(c));
                     self.token_type_from_lexeme(&lexeme)
@@ -76,6 +84,7 @@ impl Scanner {
             token_type,
             int_value,
             lexeme,
+            string_table_id,
         })
     }
 
@@ -190,6 +199,29 @@ impl Scanner {
         Ok(c)
     }
 
+    fn scan_strlit(&mut self) -> Result<usize, String> {
+        let mut strlit = String::new();
+
+        // TODO: Should we limit the length of string literals?
+        loop {
+            match self._next_char() {
+                Some(c) => {
+                    if c == '"' {
+                        break;
+                    }
+                    strlit.push(c);
+                }
+                None => {
+                    return Err(
+                        "Unexpected end of input stream while parsing string literal".into(),
+                    );
+                }
+            };
+        }
+
+        Ok(self.string_table.add(strlit))
+    }
+
     // Distinguish between identifiers and specific token types
     // based on a lexeme
     fn token_type_from_lexeme(&self, lexeme: &str) -> TokenType {
@@ -227,5 +259,28 @@ mod tests {
 
         assert_eq!(scanner.next_char(), Some('1'));
         assert_eq!(scanner.scan_int('1'), 12345);
+    }
+
+    #[test]
+    fn scan_one_char() {
+        let mut scanner = Scanner::new_from_string(String::from("'c';"));
+
+        assert_eq!(scanner.next_char(), Some('\''));
+        assert_eq!(scanner.scan_char().unwrap(), 'c' as u8);
+        assert_eq!(scanner.next_char(), Some(';'));
+    }
+
+    #[test]
+    fn scan_one_strlit() {
+        let mut scanner = Scanner::new_from_string(String::from("\"Hello world!\";"));
+
+        assert_eq!(scanner.next_char(), Some('"'));
+        let string_table_id = scanner.scan_strlit().unwrap();
+        assert_eq!(
+            scanner.string_table.get_by_id(string_table_id),
+            "Hello world!".to_string()
+        );
+
+        assert_eq!(scanner.next_char(), Some(';'));
     }
 }
