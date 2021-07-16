@@ -45,6 +45,7 @@ impl TryFrom<TokenType> for DataType {
 pub enum SymType {
     VARIABLE,
     FUNCTION,
+    ARRAY(u16),
 }
 
 #[derive(Debug, PartialEq)]
@@ -73,13 +74,12 @@ pub struct SymbolTableEntry {
     pub data_type: DataType,
     pub initial_value: i32, // Initial value for ints
     pub name: String,
-    pub size: u8, // Size of symbol, i.e. sizeof(name). We will also use this to represent the size to allocate on the stack for the function.
+    pub size: u32, // Size of symbol, i.e. sizeof(name). We will also use this to represent the size to allocate on the stack for the function.
     pub sym_type: SymType,
     pub posn: SymPosition,                           // Where to access symbol
     pub next: Option<Rc<RefCell<SymbolTableEntry>>>, // Next entry in the list, currently only used with members
     // TODO: Investigate if it was right to make this a linked list instead of a HashMap
     pub members: Option<Rc<RefCell<SymbolTableEntry>>>, // Parameters and arguments in a function
-    pub member_count: u8,
     pub sym_class: SymClass,
 }
 
@@ -88,7 +88,7 @@ impl SymbolTableEntry {
         data_type: DataType,
         initial_value: i32,
         name: String,
-        size: u8,
+        size: u32,
         sym_type: SymType,
         sym_class: SymClass,
     ) -> SymbolTableEntry {
@@ -101,7 +101,6 @@ impl SymbolTableEntry {
             posn: SymPosition::TBD,
             next: None,
             members: None,
-            member_count: 0,
             sym_class,
         }
     }

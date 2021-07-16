@@ -27,6 +27,7 @@ enum_str! {
         FUNCPARAM,
         DEREF,
         ADDR,
+        OFFSET,
     }
 }
 

@@ -25,7 +25,7 @@ impl<'a> Parser<'a> {
             Some(((), r_bp)) => {
                 let op = token_type_to_prefix_op(tok_type);
                 self.consume()?;
-                let right = self.expr_by_precedence(r_bp)?;
+                let mut right = self.expr_by_precedence(r_bp)?;
 
                 let data_type = match op {
                     ASTop::DEREF => pointer_to(right.data_type)?,
@@ -34,12 +34,18 @@ impl<'a> Parser<'a> {
                 };
 
                 if op == ASTop::ADDR {
-                    if right.op != ASTop::IDENT {
-                        return Err("May only take address of a variable.".into());
+                    match right.op {
+                        ASTop::IDENT | ASTop::OFFSET => {
+                            right.rvalue = false;
+                            ASTnode::new_unary(op, right, data_type)
+                        }
+
+                        _ => {
+                            return Err(
+                                format!("May not take address of {}.", right.op.name()).into()
+                            );
+                        }
                     }
-                    let mut node = ASTnode::new_leaf(op, 0, data_type);
-                    node.symtable_entry = right.symtable_entry;
-                    node
                 } else {
                     ASTnode::new_unary(op, right, data_type)
                 }
@@ -62,31 +68,51 @@ impl<'a> Parser<'a> {
                     break;
                 }
 
-                // Handle function calls
-                if op_tok_type == TokenType::LPAREN {
-                    if left.op != ASTop::IDENT {
-                        return Err(format!(
-                            "Function calls on '{}' are not allowed.",
-                            left.op.name()
-                        )
-                        .into());
+                match op_tok_type {
+                    // Handle function calls
+                    TokenType::LPAREN => {
+                        if left.op != ASTop::IDENT {
+                            return Err(format!(
+                                "Function calls on '{}' are not allowed.",
+                                left.op.name()
+                            )
+                            .into());
+                        }
+                        // Safe to unwrap as ASTnodes with IDENT as op
+                        // always have references to a symtable entry
+                        let mut fn_node =
+                            self.parse_func_call(&left.symtable_entry.as_ref().unwrap().borrow())?;
+                        fn_node.left = Some(left);
+                        left = fn_node;
                     }
-                    // Safe to unwrap as ASTnodes with IDENT as op
-                    // always have references to a symtable entry
-                    let mut fn_node =
-                        self.parse_func_call(&left.symtable_entry.as_ref().unwrap().borrow())?;
-                    fn_node.left = Some(left);
-                    left = fn_node;
-                } else {
-                    self.consume()?;
-                    // Here we are making the assumption that normal postfix operators
-                    // do not change the data type of their operands
-                    let prev_data_type = left.data_type;
-                    left = ASTnode::new_unary(
-                        token_type_to_postfix_op(op_tok_type),
-                        left,
-                        prev_data_type,
-                    );
+                    // Handle array access
+                    TokenType::LBRACKET => {
+                        // TODO: This should work on anything yielding a pointer type
+                        if left.op != ASTop::IDENT {
+                            return Err(format!(
+                                "Array access on {} is invalid, access by index is only possible with arrays.",
+                                left.op.name()
+                            )
+                            .into());
+                        }
+                        self.consume()?; // Consume LBRACKET
+                        let index_node = self.expr_by_precedence(0)?;
+                        self.match_token(TokenType::RBRACKET)?;
+                        let arr_ptr_type = left.data_type;
+                        let arr_data_type = pointer_to(arr_ptr_type)?;
+                        left = ASTnode::new_boxed(ASTop::OFFSET, left, index_node, arr_data_type);
+                    }
+                    _ => {
+                        self.consume()?;
+                        // Here we are making the assumption that normal postfix operators
+                        // do not change the data type of their operands
+                        let prev_data_type = left.data_type;
+                        left = ASTnode::new_unary(
+                            token_type_to_postfix_op(op_tok_type),
+                            left,
+                            prev_data_type,
+                        );
+                    }
                 }
 
                 continue;
@@ -297,6 +323,7 @@ fn postfix_binding_power(op: TokenType) -> Option<(u8, ())> {
     let res = match op {
         // For function calls
         TokenType::LPAREN => (100, ()),
+        TokenType::LBRACKET => (100, ()),
         _ => return None,
     };
     Some(res)
@@ -880,7 +907,11 @@ mod tests {
         let expected = ASTnode::new_boxed(
             ASTop::ASSIGN,
             ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INTPTR),
-            ASTnode::new_leaf(ASTop::ADDR, 0, DataType::INTPTR),
+            ASTnode::new_unary(
+                ASTop::ADDR,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                DataType::INTPTR,
+            ),
             DataType::INTPTR,
         );
 
@@ -895,7 +926,7 @@ mod tests {
             }
         };
 
-        match expr.right.unwrap().symtable_entry {
+        match expr.right.unwrap().left.unwrap().symtable_entry {
             Some(s) => {
                 assert!(Rc::ptr_eq(&sym_y, &s));
             }
@@ -903,6 +934,7 @@ mod tests {
                 panic!("Right ASTnode does not contain reference to symtable entry.");
             }
         };
+
         Ok(())
     }
 }

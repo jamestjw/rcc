@@ -30,6 +30,8 @@ enum_str! {
         BANG,
         COMMA,
         AMPERSAND,
+        LBRACKET,
+        RBRACKET,
     }
 }
 
@@ -57,6 +59,8 @@ impl fmt::Display for TokenType {
             TokenType::BANG => write!(f, "!"),
             TokenType::COMMA => write!(f, ","),
             TokenType::AMPERSAND => write!(f, "&"),
+            TokenType::LBRACKET => write!(f, "["),
+            TokenType::RBRACKET => write!(f, "]"),
         }
     }
 }

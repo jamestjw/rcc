@@ -17,11 +17,7 @@ pub fn print_tree(node: &ASTnode, indentation_count: u8) {
             println!(" rvalue:{}", node.rvalue);
         }
         ASTop::ADDR => {
-            println!(
-                ": {} rvalue:{}",
-                node.symtable_entry.as_ref().unwrap().borrow().name,
-                node.rvalue
-            );
+            println!(" rvalue:{}", node.rvalue);
         }
         ASTop::IDENT => {
             println!(

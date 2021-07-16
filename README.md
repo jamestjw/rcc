@@ -18,13 +18,15 @@ I will try to document the progress of this project as best as I can. I will mos
 
 14/7/2021 - Add support for prefix operators. Implement pointer types and support taking addresses of variables and the dereferencing of pointers. Introduced string literals.
 
+17/7/2021 - Implemented arrays
+
 ## Tests
 To run all unit tests only
 ``` bash
-cargo test --test '*'
+cargo test --lib
 ```
 
 To run all integration tests only
 ``` bash
-cargo test --lib
+cargo test --test '*'
 ```

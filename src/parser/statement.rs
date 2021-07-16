@@ -4,6 +4,8 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+use std::convert::TryInto;
+
 use super::*;
 use crate::code_generation::generate_label_for_function;
 
@@ -70,7 +72,11 @@ impl<'a> Parser<'a> {
                     Ok(Some(tree))
                 }
                 TokenType::SEMI | TokenType::COMMA => {
-                    self.parse_global_var_declaration(data_type, ident)?;
+                    self.parse_global_scalar_declaration(data_type, ident)?;
+                    Ok(None)
+                }
+                TokenType::LBRACKET => {
+                    self.parse_global_array_declaration(data_type, ident)?;
                     Ok(None)
                 }
                 _ => Err(format!("Syntax error, unexpected '{}' found", tok.token_type).into()),
@@ -83,7 +89,7 @@ impl<'a> Parser<'a> {
 
     // We require these parameters as these tokens should have
     // been scanned prior to invocation of this function
-    fn parse_global_var_declaration(
+    fn parse_global_scalar_declaration(
         &mut self,
         data_type: DataType,
         ident: Token,
@@ -106,12 +112,59 @@ impl<'a> Parser<'a> {
                         // If there are more declarations to parse, keep going
                         self.consume()?;
                         let ident_tok = self.match_token(TokenType::IDENT)?;
-                        self.parse_global_var_declaration(data_type, ident_tok)?;
+                        self.parse_global_scalar_declaration(data_type, ident_tok)?;
                     }
                     _ => return Err("Missing ',' or ';' after declaration".into()),
                 }
             }
             None => return Err("Missing ',' or ';' after declaration".into()),
+        }
+
+        Ok(())
+    }
+
+    fn parse_global_array_declaration(
+        &mut self,
+        data_type: DataType,
+        ident: Token,
+    ) -> Result<(), Box<dyn Error>> {
+        // TODO: Allow assignation of initial value during declaration
+
+        if data_type == DataType::VOID {
+            return Err("Unable to declare array with void type.".into());
+        }
+        self.match_token(TokenType::LBRACKET)?;
+        let array_size: u16 = self
+            .match_token(TokenType::INTLIT)?
+            .int_value
+            .try_into()
+            .expect("Array size is too large.");
+        self.match_token(TokenType::RBRACKET)?;
+
+        self.add_global_symbol(
+            ident.lexeme,
+            to_pointer(data_type)?,
+            0,
+            SymType::ARRAY(array_size),
+            0,
+        );
+
+        match &self.current_token {
+            Some(token) => {
+                match token.token_type {
+                    TokenType::SEMI => {
+                        self.consume()?;
+                    }
+                    TokenType::COMMA => {
+                        // If there are more declarations to parse, keep going
+                        self.consume()?;
+                        let ident_tok = self.match_token(TokenType::IDENT)?;
+                        self.parse_global_array_declaration(data_type, ident_tok)?;
+                    }
+                    _ => return Err("Missing ',' or ';' after array declaration".into()),
+                }
+            }
+            None => return Err("Missing ',' or ';' after array declaration".into()),
         }
 
         Ok(())
@@ -335,6 +388,54 @@ mod tests {
             Err(e) => {
                 assert_eq!("Unable to declare variables with void type.", e.to_string());
             }
+        }
+    }
+
+    #[test]
+    fn parse_global_single_array_declaration() {
+        let mut scanner = Scanner::new_from_string(String::from("int x[5];"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let expr = parser.parse_global_declaration().unwrap();
+
+        assert!(expr.is_none());
+
+        match parser.global_symbol_table.get("x") {
+            Some(new_sym) => {
+                let new_sym = new_sym.borrow();
+                assert_eq!(new_sym.data_type, DataType::INTPTR);
+                assert_eq!(new_sym.initial_value, 0);
+                assert_eq!(new_sym.sym_type, SymType::ARRAY(5));
+            }
+            None => panic!("New symbol table entry not found"),
+        }
+    }
+
+    #[test]
+    fn parse_global_array_list_declaration() {
+        let mut scanner = Scanner::new_from_string(String::from("int x[5], y[10];"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let expr = parser.parse_global_declaration().unwrap();
+
+        assert!(expr.is_none());
+
+        match parser.global_symbol_table.get("x") {
+            Some(new_sym) => {
+                let new_sym = new_sym.borrow();
+                assert_eq!(new_sym.data_type, DataType::INTPTR);
+                assert_eq!(new_sym.initial_value, 0);
+                assert_eq!(new_sym.sym_type, SymType::ARRAY(5));
+            }
+            None => panic!("New symbol table entry not found for x"),
+        }
+
+        match parser.global_symbol_table.get("y") {
+            Some(new_sym) => {
+                let new_sym = new_sym.borrow();
+                assert_eq!(new_sym.data_type, DataType::INTPTR);
+                assert_eq!(new_sym.initial_value, 0);
+                assert_eq!(new_sym.sym_type, SymType::ARRAY(10));
+            }
+            None => panic!("New symbol table entry not found for y"),
         }
     }
 

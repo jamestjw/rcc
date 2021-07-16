@@ -139,7 +139,7 @@ impl<'a> Parser<'a> {
         data_type: DataType,
         initial_value: i32,
         sym_type: SymType,
-        size: u8,
+        size: u32,
     ) -> Rc<RefCell<SymbolTableEntry>> {
         // TODO: Is there a reasonable way to avoid cloning the lexeme?
         let sym = Rc::new(RefCell::new(SymbolTableEntry::new(
@@ -166,7 +166,7 @@ fn to_pointer(data_type: DataType) -> Result<DataType, String> {
     }
 }
 
-fn pointer_to(data_type: DataType) -> Result<DataType, String> {
+pub fn pointer_to(data_type: DataType) -> Result<DataType, String> {
     match data_type {
         DataType::INTPTR => Ok(DataType::INT),
         DataType::CHARPTR => Ok(DataType::CHAR),

@@ -114,7 +114,7 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         }
     };
 
-    // crate::debug::print_tree(&stmts, 0);
+    crate::debug::print_tree(&stmts, 0);
 
     let mut generator = code_generation::x86_64::Generator_x86_64::new();
     generator.preprocess_symbols(&parser.global_symbol_table);
@@ -141,4 +141,12 @@ pub fn assemble_and_link(input_fname: &Path, output_fname: &Path) {
     assemble
         .status()
         .expect("Failed to execute assembler and linker");
+}
+
+const fn num_bits<T>() -> usize {
+    std::mem::size_of::<T>() * 8
+}
+
+pub fn log_2(u: u32) -> u32 {
+    num_bits::<u32>() as u32 - u.leading_zeros() - 1
 }

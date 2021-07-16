@@ -5,7 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use super::*;
-use crate::parser::{SymPosition, SymType};
+use crate::parser::SymType;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -79,7 +79,7 @@ impl Generator_x86_64 {
         self.registers[i].quad_name.clone()
     }
 
-    fn reg_name_for_size(&self, i: usize, data_size: u8) -> String {
+    fn reg_name_for_size(&self, i: usize, data_size: u32) -> String {
         match data_size {
             1 => self.registers[i].byte_name.clone(),
             4 => self.registers[i].long_name.clone(),
@@ -185,7 +185,7 @@ impl Generator for Generator_x86_64 {
         r1
     }
 
-    fn divide(&mut self, r1: usize, r2: usize, data_size: u8) -> usize {
+    fn divide(&mut self, r1: usize, r2: usize, data_size: u32) -> usize {
         // Move dividend to rax
         self.gen_binary_op(
             move_signex_op(data_size),
@@ -236,7 +236,7 @@ impl Generator for Generator_x86_64 {
         r
     }
 
-    fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u8) -> usize {
+    fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u32) -> usize {
         let op_name = match data_size {
             1 => "movb",
             4 => "movl",
@@ -254,22 +254,24 @@ impl Generator for Generator_x86_64 {
 
     fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
         for (sym_name, entry) in symtable {
-            if entry.borrow().sym_type != SymType::VARIABLE {
-                continue;
-            }
+            match entry.borrow().sym_type {
+                SymType::VARIABLE => {}
+                SymType::ARRAY(_) => {}
+                _ => {
+                    continue;
+                }
+            };
             self.output_str
                 .push_str(&format!("\t.globl  {0}\n\t.bss\n", sym_name,));
 
+            // TODO: Figure out correctness of alignment
             let size = entry.borrow().size;
+            let align = 2_u32.pow(crate::log_2(size));
 
-            match size {
-                0..=3 => {}
-                4..=7 => {
-                    self.output_str.push_str(&format!("\t.align 4\n"));
-                }
-                8..=u8::MAX => {
-                    self.output_str.push_str(&format!("\t.align 8\n"));
-                }
+            if align >= 32 {
+                self.output_str.push_str(&format!("\t.align 32\n"));
+            } else if align >= 4 {
+                self.output_str.push_str(&format!("\t.align {}\n", align));
             }
 
             self.output_str.push_str(&format!(
@@ -387,7 +389,7 @@ impl Generator for Generator_x86_64 {
                         match member_node {
                             Some(node) => {
                                 let mem_size = self.data_type_to_size(node.borrow().data_type);
-                                node.borrow_mut().size = mem_size;
+                                node.borrow_mut().size = mem_size as u32;
 
                                 if i < PARAM_REGS.len() {
                                     node.borrow_mut().posn =
@@ -411,13 +413,20 @@ impl Generator for Generator_x86_64 {
                         }
                     }
                 }
+                SymType::ARRAY(size) => {
+                    entry.posn = SymPosition::Label(sym_name.clone());
+                    // This unwrap should be safe since data type for arrays should
+                    // always be validated in the parser
+                    entry.size =
+                        self.data_type_to_size(pointer_to(entry.data_type).unwrap()) * size as u32;
+                }
             }
         }
     }
 
     // TODO: The behaviour of this method is only coherent if we invoke this
     // before function calls. Perhaps the name of the method should be changed.
-    fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u8) {
+    fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u32) {
         if let SymPosition::PositiveBPOffset(_) = posn {
             // TODO: Push with right datasize
             self.gen_unary_op("pushq", Operand::Reg(self.reg_name(r)));
@@ -432,7 +441,7 @@ impl Generator for Generator_x86_64 {
         self.free_register(r);
     }
 
-    fn data_type_to_size(&self, data_type: DataType) -> u8 {
+    fn data_type_to_size(&self, data_type: DataType) -> u32 {
         match data_type {
             DataType::INT => 4,
             DataType::CHAR => 1,
@@ -444,7 +453,7 @@ impl Generator for Generator_x86_64 {
     }
 
     // TODO: Customise based on size
-    fn load_from_addr(&mut self, r: usize, data_size: u8) -> usize {
+    fn load_from_addr(&mut self, r: usize, data_size: u32) -> usize {
         let op = move_signex_op(data_size);
         self.gen_binary_op(
             op,
@@ -476,7 +485,7 @@ fn sym_posn_to_string(posn: &SymPosition) -> String {
     }
 }
 
-fn move_signex_op(data_size: u8) -> &'static str {
+fn move_signex_op(data_size: u32) -> &'static str {
     match data_size {
         1 => "movsbq",
         4 => "movslq",
@@ -494,7 +503,7 @@ fn str_label(id: usize) -> String {
 // TODO: Seems like this is not necessary for now
 // Returns the op name and the size that was matched, some sizes
 // default to operators of a different size.
-// fn add_op(data_size: u8) -> (&'static str, u8) {
+// fn add_op(data_size: u32) -> (&'static str, u8) {
 //     match data_size {
 //         1..=4 => ("addl", 4),
 //         8 => ("addq", 8),
@@ -504,7 +513,7 @@ fn str_label(id: usize) -> String {
 //     }
 // }
 
-// fn sub_op(data_size: u8) -> (&'static str, u8) {
+// fn sub_op(data_size: u32) -> (&'static str, u8) {
 //     match data_size {
 //         1..=4 => ("subl", 4),
 //         8 => ("subq", 8),
@@ -514,7 +523,7 @@ fn str_label(id: usize) -> String {
 //     }
 // }
 
-// fn mul_op(data_size: u8) -> (&'static str, u8) {
+// fn mul_op(data_size: u32) -> (&'static str, u8) {
 //     match data_size {
 //         1..=4 => ("imull", 4),
 //         8 => ("imulq", 8),

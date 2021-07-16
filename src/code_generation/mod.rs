@@ -4,7 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::parser::{ASTnode, ASTop, DataType, SymPosition, SymbolTableEntry};
+use crate::parser::{pointer_to, ASTnode, ASTop, DataType, SymPosition, SymType, SymbolTableEntry};
 use crate::string_table::StringTable;
 
 use std::cell::RefCell;
@@ -50,12 +50,12 @@ pub trait Generator {
     fn add(&mut self, r1: usize, r2: usize) -> usize;
     fn minus(&mut self, r1: usize, r2: usize) -> usize;
     fn multiply(&mut self, r1: usize, r2: usize) -> usize;
-    fn divide(&mut self, r1: usize, r2: usize, data_size: u8) -> usize;
+    fn divide(&mut self, r1: usize, r2: usize, data_size: u32) -> usize;
     fn load_var(&mut self, sym: &SymbolTableEntry) -> usize;
-    fn load_from_addr(&mut self, r: usize, data_size: u8) -> usize;
+    fn load_from_addr(&mut self, r: usize, data_size: u32) -> usize;
     fn load_addr(&mut self, sym: &SymbolTableEntry) -> usize;
     fn assign_glob_var(&mut self, sym: &SymbolTableEntry, r: usize) -> usize;
-    fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u8) -> usize;
+    fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u32) -> usize;
     fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
     fn preamble(&mut self);
     fn postamble(&mut self);
@@ -66,8 +66,8 @@ pub trait Generator {
     fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
     // Set symbol position and sizes
     fn preprocess_symbols(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
-    fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u8);
-    fn data_type_to_size(&self, data_type: DataType) -> u8;
+    fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u32);
+    fn data_type_to_size(&self, data_type: DataType) -> u32;
     fn gen_strlits(&mut self, string_table: &StringTable);
 }
 
@@ -113,13 +113,20 @@ pub fn generate_code_for_node(
         ASTop::MULTIPLY => Some(generator.multiply(left_reg.unwrap(), right_reg.unwrap())),
         ASTop::DIVIDE => Some(generator.divide(left_reg.unwrap(), right_reg.unwrap(), data_size)),
         ASTop::IDENT => {
-            if node.rvalue {
-                let sym = node.symtable_entry.as_ref().unwrap().borrow();
-                Some(generator.load_var(&sym))
-            } else {
-                // In cases where an IDENT is used as a left-value,
-                // the parent node will take care of what needs to be done.
-                None
+            let sym = node.symtable_entry.as_ref().unwrap().borrow();
+
+            match sym.sym_type {
+                SymType::ARRAY(_) => Some(generator.load_addr(&sym)),
+                _ => {
+                    if node.rvalue {
+                        let sym = node.symtable_entry.as_ref().unwrap().borrow();
+                        Some(generator.load_var(&sym))
+                    } else {
+                        // In cases where an IDENT is used as a left-value,
+                        // the parent node will take care of what needs to be done.
+                        None
+                    }
+                }
             }
         }
         ASTop::DEREF => {
@@ -149,7 +156,7 @@ pub fn generate_code_for_node(
                         Some(generator.assign_glob_var(&sym, right_reg.unwrap()))
                     }
                     // TODO: Pass in the right size
-                    ASTop::DEREF => {
+                    ASTop::DEREF | ASTop::OFFSET => {
                         Some(generator.assign_to_addr(left_reg.unwrap(), right_reg.unwrap(), 8))
                     }
                     _ => {
@@ -161,10 +168,28 @@ pub fn generate_code_for_node(
                 }
             }
         }
-        ASTop::ADDR => {
-            let sym = node.symtable_entry.as_ref().unwrap().borrow();
-            Some(generator.load_addr(&sym))
-        }
+        ASTop::ADDR => match &node.left {
+            Some(left) => match left.op {
+                ASTop::IDENT => {
+                    let sym = node
+                        .left
+                        .as_ref()
+                        .unwrap()
+                        .symtable_entry
+                        .as_ref()
+                        .unwrap()
+                        .borrow();
+                    Some(generator.load_addr(&sym))
+                }
+                ASTop::OFFSET => left_reg,
+                _ => {
+                    panic!("Unexpected operand in ASTop::ADDR");
+                }
+            },
+            None => {
+                panic!("Left node should not be empty for ASTop::ADDR.");
+            }
+        },
         ASTop::RETURN => {
             generator.return_from_func(node.label.as_ref()?, left_reg);
             None
@@ -173,7 +198,18 @@ pub fn generate_code_for_node(
             // This is safe as we can count on STRLITs to have a string table ID
             Some(generator.load_strlit(node.string_table_id.unwrap()))
         }
-
+        ASTop::OFFSET => {
+            // TODO: This uses needlessly many operations, should be optimised
+            let data_size = generator.data_type_to_size(node.data_type);
+            let data_size_reg = generator.load_integer(data_size as i32);
+            let offset_reg = generator.multiply(right_reg.unwrap(), data_size_reg);
+            let addr_reg = generator.add(left_reg.unwrap(), offset_reg);
+            if node.rvalue {
+                Some(generator.load_from_addr(addr_reg, data_size))
+            } else {
+                Some(addr_reg)
+            }
+        }
         ASTop::NOOP | ASTop::GLUE => None,
         _ => {
             panic!(
