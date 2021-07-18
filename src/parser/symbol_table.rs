@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
 
@@ -22,6 +23,7 @@ enum_str! {
         CHAR,
         CHARPTR,
         VOID,
+        STRUCT,
     }
 }
 
@@ -46,12 +48,28 @@ pub enum SymType {
     VARIABLE,
     FUNCTION,
     ARRAY(u16),
+    STRUCT,
 }
 
-#[derive(Debug, PartialEq)]
-pub enum SymClass {
-    GLOBAL,
-    PARAM,
+impl SymType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            SymType::VARIABLE => "VARIABLE",
+            SymType::FUNCTION => "FUNCTION",
+            SymType::ARRAY(_) => "ARRAY",
+            SymType::STRUCT => "STRUCT",
+        }
+    }
+}
+
+enum_str! {
+    #[derive(Debug, PartialEq)]
+    pub enum SymClass {
+        GLOBAL,
+        PARAM,
+        MEMBER,
+        STRUCT,
+    }
 }
 
 #[derive(Debug)]
@@ -63,8 +81,61 @@ pub enum SymPosition {
     PositiveBPOffset(i8),
     // If a symbol can be expected to be found at some label, e.g. global vars
     Label(String),
+    // Offset from base of a structure
+    StructBaseOffset(i32),
     // When position of a symbol is not yet determined
     TBD,
+}
+
+pub struct SymbolTable {
+    pub table: HashMap<String, Rc<RefCell<SymbolTableEntry>>>,
+}
+
+impl SymbolTable {
+    pub fn new() -> SymbolTable {
+        SymbolTable {
+            table: HashMap::new(),
+        }
+    }
+
+    pub fn add_symbol(
+        &mut self,
+        lexeme: String,
+        data_type: DataType,
+        initial_value: i32,
+        sym_type: SymType,
+        size: u32,
+        sym_class: SymClass,
+    ) -> Rc<RefCell<SymbolTableEntry>> {
+        // TODO: Is there a reasonable way to avoid cloning the lexeme?
+        let sym = Rc::new(RefCell::new(SymbolTableEntry::new(
+            data_type,
+            initial_value,
+            lexeme.clone(),
+            size,
+            sym_type,
+            sym_class,
+        )));
+        self.table.insert(lexeme, Rc::clone(&sym));
+        sym
+    }
+
+    pub fn find_symbol(
+        &self,
+        lexeme: &str,
+        sym_class: SymClass,
+    ) -> Option<Rc<RefCell<SymbolTableEntry>>> {
+        match self.table.get(lexeme) {
+            Some(sym) => {
+                if sym.borrow().sym_class == sym_class {
+                    Some(Rc::clone(sym))
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
+    }
 }
 
 // TODO: Is there any way to reduce the number of possibly useless fields?
@@ -79,7 +150,8 @@ pub struct SymbolTableEntry {
     pub posn: SymPosition,                           // Where to access symbol
     pub next: Option<Rc<RefCell<SymbolTableEntry>>>, // Next entry in the list, currently only used with members
     // TODO: Investigate if it was right to make this a linked list instead of a HashMap
-    pub members: Option<Rc<RefCell<SymbolTableEntry>>>, // Parameters and arguments in a function
+    pub members: Option<Rc<RefCell<SymbolTableEntry>>>, // Parameters and arguments in a function/Members of a struct
+    pub type_sym: Option<Rc<RefCell<SymbolTableEntry>>>, // Reference to struct symbol for struct variables
     pub sym_class: SymClass,
 }
 
@@ -102,6 +174,7 @@ impl SymbolTableEntry {
             next: None,
             members: None,
             sym_class,
+            type_sym: None,
         }
     }
 

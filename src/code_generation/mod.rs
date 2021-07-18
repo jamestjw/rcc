@@ -4,11 +4,11 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::parser::{pointer_to, ASTnode, ASTop, DataType, SymPosition, SymType, SymbolTableEntry};
+use crate::parser::{
+    pointer_to, ASTnode, ASTop, DataType, SymPosition, SymType, SymbolTable, SymbolTableEntry,
+};
 use crate::string_table::StringTable;
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 use std::rc::Rc;
@@ -56,7 +56,7 @@ pub trait Generator {
     fn load_addr(&mut self, sym: &SymbolTableEntry) -> usize;
     fn assign_glob_var(&mut self, sym: &SymbolTableEntry, r: usize) -> usize;
     fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u32) -> usize;
-    fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
+    fn gen_glob_syms(&mut self, symtable: &SymbolTable);
     fn preamble(&mut self);
     fn postamble(&mut self);
     fn func_preamble(&mut self, fn_name: &str);
@@ -65,7 +65,7 @@ pub trait Generator {
     fn funccall(&mut self, fn_name: &str, num_params: usize) -> usize;
     fn generate_output(&mut self, output_filename: &Path) -> Result<(), Box<dyn Error>>;
     // Set symbol position and sizes
-    fn preprocess_symbols(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>);
+    fn preprocess_symbols(&mut self, symtable: &SymbolTable);
     fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u32);
     fn data_type_to_size(&self, data_type: DataType) -> u32;
     fn gen_strlits(&mut self, string_table: &StringTable);
@@ -79,11 +79,21 @@ pub fn generate_code_for_node(
     node: &Box<ASTnode>,
 ) -> Option<usize> {
     // Special cases
-    if node.op == ASTop::FUNCTION {
-        generate_code_for_function(generator, node);
-        return None;
-    } else if node.op == ASTop::FUNCCALL {
-        return Some(generate_code_for_funccall(generator, node));
+    match node.op {
+        ASTop::FUNCTION => {
+            generate_code_for_function(generator, node);
+            return None;
+        }
+        ASTop::FUNCCALL => {
+            return Some(generate_code_for_funccall(generator, node));
+        }
+        ASTop::MEMBER => {
+            return Some(generate_code_for_struct_member_access(generator, node));
+        }
+        ASTop::ASSIGN => {
+            return Some(generate_code_for_assignation(generator, node));
+        }
+        _ => {}
     }
 
     let mut left_reg: Option<usize> = None;
@@ -116,6 +126,7 @@ pub fn generate_code_for_node(
             let sym = node.symtable_entry.as_ref().unwrap().borrow();
 
             match sym.sym_type {
+                // Special case since array variables are actually pointers
                 SymType::ARRAY(_) => Some(generator.load_addr(&sym)),
                 _ => {
                     if node.rvalue {
@@ -124,7 +135,7 @@ pub fn generate_code_for_node(
                     } else {
                         // In cases where an IDENT is used as a left-value,
                         // the parent node will take care of what needs to be done.
-                        None
+                        Some(generator.load_addr(&sym))
                     }
                 }
             }
@@ -138,36 +149,42 @@ pub fn generate_code_for_node(
                 left_reg
             }
         }
-        ASTop::ASSIGN => {
-            // TODO: Consider putting this in a different function.
+        // ASTop::ASSIGN => {
+        //     // TODO: Consider putting this in a different function.
 
-            match &node.left {
-                Some(left) => match left.op {
-                    ASTop::IDENT => {
-                        let sym = node
-                            .left
-                            .as_ref()
-                            .unwrap()
-                            .symtable_entry
-                            .as_ref()
-                            .unwrap()
-                            .borrow();
+        //     let data_size = generator.data_type_to_size(node.right.as_ref().unwrap().data_type);
+        //     Some(generator.assign_to_addr(left_reg.unwrap(), right_reg.unwrap(), data_size))
 
-                        Some(generator.assign_glob_var(&sym, right_reg.unwrap()))
-                    }
-                    // TODO: Pass in the right size
-                    ASTop::DEREF | ASTop::OFFSET => {
-                        Some(generator.assign_to_addr(left_reg.unwrap(), right_reg.unwrap(), 8))
-                    }
-                    _ => {
-                        panic!("Unable to assign to {}.", left.op.name());
-                    }
-                },
-                None => {
-                    panic!("Left node should not be empty for ASTop::ASSIGN.");
-                }
-            }
-        }
+        //     // match &node.left {
+        //     //     Some(left) => match left.op {
+        //     //         ASTop::IDENT => {
+        //     //             let sym = node
+        //     //                 .left
+        //     //                 .as_ref()
+        //     //                 .unwrap()
+        //     //                 .symtable_entry
+        //     //                 .as_ref()
+        //     //                 .unwrap()
+        //     //                 .borrow();
+
+        //     //             Some(generator.assign_glob_var(&sym, right_reg.unwrap()))
+        //     //         }
+
+        //     //         _ => {
+        //     //             let data_size =
+        //     //                 generator.data_type_to_size(node.right.as_ref().unwrap().data_type);
+        //     //             Some(generator.assign_to_addr(
+        //     //                 left_reg.unwrap(),
+        //     //                 right_reg.unwrap(),
+        //     //                 data_size,
+        //     //             ))
+        //     //         }
+        //     //     },
+        //     //     None => {
+        //     //         panic!("Left node should not be empty for ASTop::ASSIGN.");
+        //     //     }
+        //     // }
+        // }
         ASTop::ADDR => match &node.left {
             Some(left) => match left.op {
                 ASTop::IDENT => {
@@ -296,4 +313,86 @@ fn generate_code_for_funccall_param(
     } else {
         1
     }
+}
+
+fn generate_code_for_struct_member_access(
+    generator: &mut impl Generator,
+    node: &Box<ASTnode>,
+) -> usize {
+    let struct_base_node = node.left.as_ref().unwrap();
+
+    let mut addr_reg = match struct_base_node.op {
+        ASTop::IDENT => {
+            // Safe as IDENT nodes always have symtable entries
+            generator.load_addr(&struct_base_node.symtable_entry.as_ref().unwrap().borrow())
+        }
+        ASTop::MEMBER => {
+            todo!("support chaining dot operator for struct member access");
+        }
+        _ => {
+            panic!(
+                "Unexpected operand type {} for ASTop::MEMBER",
+                struct_base_node.op.name()
+            );
+        }
+    };
+
+    // MEMBER nodes always have symtable entries, hence this is safe
+    let member_node = node.symtable_entry.as_ref().unwrap().borrow();
+
+    match member_node.posn {
+        SymPosition::StructBaseOffset(i) => {
+            // TODO: Optimise this extra step of loading the integer literal
+            let offset_reg = generator.load_integer(i);
+            addr_reg = generator.add(addr_reg, offset_reg);
+        }
+        _ => {
+            panic!("Invalid position for member of struct");
+        }
+    };
+
+    if node.rvalue {
+        generator.load_from_addr(addr_reg, generator.data_type_to_size(member_node.data_type))
+    } else {
+        addr_reg
+    }
+}
+
+fn generate_code_for_assignation(generator: &mut impl Generator, node: &Box<ASTnode>) -> usize {
+    // Generate code for right register first to avoid using up registers unnecessarily
+    // before we need them
+    let right_reg = match &node.right {
+        Some(right) => {
+            let r = generate_code_for_node(generator, right);
+
+            if node.op == ASTop::GLUE {
+                generator.free_all_registers();
+            }
+
+            r
+        }
+        None => {
+            panic!("Right operand is empty for assignation node");
+        }
+    };
+
+    let left_reg = match &node.left {
+        Some(left) => {
+            let r = generate_code_for_node(generator, left);
+
+            if node.op == ASTop::GLUE {
+                generator.free_all_registers();
+            }
+
+            r
+        }
+        None => {
+            panic!("Left operand is empty for assignation node");
+        }
+    };
+
+    // Data size should correspond to that of the destination
+    // TODO: Should we consider the size of the rvalue as well?
+    let data_size = generator.data_type_to_size(node.left.as_ref().unwrap().data_type);
+    generator.assign_to_addr(left_reg.unwrap(), right_reg.unwrap(), data_size)
 }

@@ -237,23 +237,24 @@ impl Generator for Generator_x86_64 {
     }
 
     fn assign_to_addr(&mut self, r1: usize, r2: usize, data_size: u32) -> usize {
-        let op_name = match data_size {
-            1 => "movb",
-            4 => "movl",
-            8 => "movq",
-            _ => panic!("Invalid size in assign_to_addr."),
-        };
+        // let op_name = match data_size {
+        //     1 => "movb",
+        //     4 => "movl",
+        //     8 => "movq",
+        //     _ => panic!("Invalid size in assign_to_addr."),
+        // };
+        let op_name = move_op(data_size);
         self.gen_binary_op(
             op_name,
             Operand::Reg(self.reg_name_for_size(r2, data_size)),
-            Operand::Addr(self.reg_name_for_size(r1, data_size)),
+            Operand::Addr(self.reg_name(r1)),
         );
         self.free_register(r2);
         r1
     }
 
-    fn gen_glob_syms(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
-        for (sym_name, entry) in symtable {
+    fn gen_glob_syms(&mut self, symtable: &SymbolTable) {
+        for (sym_name, entry) in &symtable.table {
             match entry.borrow().sym_type {
                 SymType::VARIABLE => {}
                 SymType::ARRAY(_) => {}
@@ -264,8 +265,9 @@ impl Generator for Generator_x86_64 {
             self.output_str
                 .push_str(&format!("\t.globl  {0}\n\t.bss\n", sym_name,));
 
-            // TODO: Figure out correctness of alignment
+            // TODO: Handle alignment correctly based on the structure.
             let size = entry.borrow().size;
+
             let align = 2_u32.pow(crate::log_2(size));
 
             if align >= 32 {
@@ -363,14 +365,19 @@ impl Generator for Generator_x86_64 {
         return r;
     }
 
-    fn preprocess_symbols(&mut self, symtable: &HashMap<String, Rc<RefCell<SymbolTableEntry>>>) {
-        for (sym_name, entry) in symtable {
+    fn preprocess_symbols(&mut self, symtable: &SymbolTable) {
+        for (sym_name, entry) in &symtable.table {
             let mut entry = entry.borrow_mut();
             match entry.sym_type {
                 SymType::VARIABLE => {
                     // Global variables can be referred directly to by their names
                     entry.posn = SymPosition::Label(sym_name.clone());
-                    entry.size = self.data_type_to_size(entry.data_type);
+
+                    let entry_size = match &entry.type_sym {
+                        Some(sym) => sym.borrow().size,
+                        None => self.data_type_to_size(entry.data_type),
+                    };
+                    entry.size = entry_size;
                 }
                 SymType::FUNCTION => {
                     // Functions can be referred directly to by their names
@@ -420,6 +427,37 @@ impl Generator for Generator_x86_64 {
                     entry.size =
                         self.data_type_to_size(pointer_to(entry.data_type).unwrap()) * size as u32;
                 }
+                SymType::STRUCT => {
+                    let mut struct_size = 0;
+
+                    let mut member_node = match &entry.members {
+                        Some(n) => Some(Rc::clone(n)),
+                        None => None,
+                    };
+
+                    loop {
+                        match member_node {
+                            Some(node) => {
+                                let mem_size = self.data_type_to_size(node.borrow().data_type);
+                                node.borrow_mut().size = mem_size as u32;
+                                struct_size += mem_size;
+                                // TODO: Handle aligning of struct members
+                                node.borrow_mut().posn =
+                                    SymPosition::StructBaseOffset(mem_size as i32);
+                                if node.borrow().next.is_some() {
+                                    member_node =
+                                        Some(Rc::clone(node.borrow().next.as_ref().unwrap()));
+                                } else {
+                                    member_node = None;
+                                }
+                            }
+                            None => {
+                                break;
+                            }
+                        }
+                    }
+                    entry.size = struct_size;
+                }
             }
         }
     }
@@ -449,6 +487,9 @@ impl Generator for Generator_x86_64 {
             DataType::CHARPTR => 8,
             DataType::VOID => 0,
             DataType::NONE => 0,
+            _ => {
+                panic!("Unknown size for {} type.", data_type.name());
+            }
         }
     }
 
@@ -479,6 +520,9 @@ fn sym_posn_to_string(posn: &SymPosition) -> String {
         SymPosition::Reg(s) => format!("%{}", s),
         SymPosition::PositiveBPOffset(i) => format!("{}(%rbp)", i),
         SymPosition::Label(s) => format!("{}(%rip)", s),
+        SymPosition::StructBaseOffset(_) => {
+            panic!("Position of struct base offset cannot be determined without the base.");
+        }
         SymPosition::TBD => {
             panic!("Position of symbol undetermined.");
         }
@@ -489,6 +533,17 @@ fn move_signex_op(data_size: u32) -> &'static str {
     match data_size {
         1 => "movsbq",
         4 => "movslq",
+        8 => "movq",
+        _ => {
+            panic!("Unknown size: {} in move_signex_op", data_size);
+        }
+    }
+}
+
+fn move_op(data_size: u32) -> &'static str {
+    match data_size {
+        1 => "movb",
+        4 => "movl",
         8 => "movq",
         _ => {
             panic!("Unknown size: {} in move_signex_op", data_size);

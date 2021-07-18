@@ -10,7 +10,7 @@ use super::*;
 use crate::code_generation::generate_label_for_function;
 
 impl<'a> Parser<'a> {
-    pub fn parse_global_declarations(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+    pub fn parse_global_statements(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
         let mut tree: Option<Box<ASTnode>> = None;
 
         while self.current_token.as_ref().unwrap().token_type != TokenType::EOF {
@@ -62,27 +62,37 @@ impl<'a> Parser<'a> {
     // Parse a global declaration and maybe return an ASTnode.
     // Global var declarations do not yield ASTNodes
     fn parse_global_declaration(&mut self) -> Result<Option<Box<ASTnode>>, Box<dyn Error>> {
-        let data_type = self.parse_type()?;
-        let ident = self.match_token(TokenType::IDENT)?;
+        match self.current_token_type()? {
+            TokenType::STRUCT => {
+                self.parse_struct_definition()?;
+                Ok(None)
+            }
+            _ => {
+                let data_type = self.parse_type()?;
+                let ident = self.match_token(TokenType::IDENT)?;
 
-        match &self.current_token {
-            Some(tok) => match tok.token_type {
-                TokenType::LPAREN => {
-                    let tree = self.parse_func_declaration(ident, data_type)?;
-                    Ok(Some(tree))
+                match &self.current_token {
+                    Some(tok) => match tok.token_type {
+                        TokenType::LPAREN => {
+                            let tree = self.parse_func_declaration(ident, data_type)?;
+                            Ok(Some(tree))
+                        }
+                        TokenType::SEMI | TokenType::COMMA => {
+                            self.parse_global_scalar_declaration(data_type, ident)?;
+                            Ok(None)
+                        }
+                        TokenType::LBRACKET => {
+                            self.parse_global_array_declaration(data_type, ident)?;
+                            Ok(None)
+                        }
+                        _ => Err(
+                            format!("Syntax error, unexpected '{}' found", tok.token_type).into(),
+                        ),
+                    },
+                    None => {
+                        panic!("Unexpected error: No more tokens found in parse_statement.");
+                    }
                 }
-                TokenType::SEMI | TokenType::COMMA => {
-                    self.parse_global_scalar_declaration(data_type, ident)?;
-                    Ok(None)
-                }
-                TokenType::LBRACKET => {
-                    self.parse_global_array_declaration(data_type, ident)?;
-                    Ok(None)
-                }
-                _ => Err(format!("Syntax error, unexpected '{}' found", tok.token_type).into()),
-            },
-            None => {
-                panic!("Unexpected error: No more tokens found in parse_statement.");
             }
         }
     }
@@ -100,7 +110,14 @@ impl<'a> Parser<'a> {
             return Err("Unable to declare variables with void type.".into());
         }
 
-        self.add_global_symbol(ident.lexeme, data_type, 0, SymType::VARIABLE, 0);
+        self.global_symbol_table.add_symbol(
+            ident.lexeme,
+            data_type,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
 
         match &self.current_token {
             Some(token) => {
@@ -141,12 +158,13 @@ impl<'a> Parser<'a> {
             .expect("Array size is too large.");
         self.match_token(TokenType::RBRACKET)?;
 
-        self.add_global_symbol(
+        self.global_symbol_table.add_symbol(
             ident.lexeme,
             to_pointer(data_type)?,
             0,
             SymType::ARRAY(array_size),
             0,
+            SymClass::GLOBAL,
         );
 
         match &self.current_token {
@@ -213,13 +231,157 @@ impl<'a> Parser<'a> {
         Ok(sym)
     }
 
+    // Handles all three possibilities
+    // i. struct Person { int x; };
+    // ii. struct Person { int x; } person1;
+    // iii. struct Person person1;
+    fn parse_struct_definition(&mut self) -> Result<(), Box<dyn Error>> {
+        self.match_token(TokenType::STRUCT)?;
+        let struct_name_tok = self.match_token(TokenType::IDENT)?;
+
+        let next_token = self.current_token_type()?;
+
+        match next_token {
+            // Creating variable from previously defined struct
+            TokenType::IDENT => {
+                self.parse_struct_variable_declaration(&struct_name_tok.lexeme)?;
+                self.match_token(TokenType::SEMI)?;
+                Ok(())
+            }
+            TokenType::LBRACE => {
+                // So that we can handle references to the same struct within its definition
+                let sym = self.composite_symbol_table.add_symbol(
+                    struct_name_tok.lexeme.clone(),
+                    DataType::NONE,
+                    0,
+                    SymType::STRUCT,
+                    0,
+                    SymClass::STRUCT,
+                );
+
+                self.match_token(TokenType::LBRACE)?;
+
+                // Only parse members if the struct is not empty
+                if !self.is_token_type(TokenType::RBRACE)? {
+                    sym.borrow_mut()
+                        .add_member(self.parse_struct_members_declaration()?);
+                }
+
+                self.match_token(TokenType::RBRACE)?;
+
+                // We might have a struct variable definition following definition of a struct.
+                let next_token = self.current_token_type()?;
+
+                match next_token {
+                    TokenType::SEMI => {}
+                    TokenType::IDENT => {
+                        self.parse_struct_variable_declaration(&struct_name_tok.lexeme)?;
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Syntax error, expected ';' or identifier but encountered {} instead",
+                            next_token
+                        )
+                        .into());
+                    }
+                }
+
+                self.match_token(TokenType::SEMI)?;
+                Ok(())
+            }
+            _ => {
+                return Err(format!(
+                    "Syntax error, expected '{{' or identifier but encountered {} instead",
+                    next_token
+                )
+                .into());
+            }
+        }
+    }
+
+    fn parse_struct_variable_declaration(
+        &mut self,
+        struct_name: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        let ident = self.match_token(TokenType::IDENT)?;
+        match self
+            .composite_symbol_table
+            .find_symbol(struct_name, SymClass::STRUCT)
+        {
+            Some(struct_sym) => {
+                // We add the symbol here so that recursive calls work
+                let sym = self.global_symbol_table.add_symbol(
+                    ident.lexeme,
+                    DataType::STRUCT,
+                    0,
+                    SymType::VARIABLE,
+                    0,
+                    SymClass::GLOBAL,
+                );
+                sym.borrow_mut().type_sym = Some(Rc::clone(&struct_sym));
+
+                Ok(())
+            }
+            None => Err(format!("Referencing undefined struct: {}", &ident.lexeme).into()),
+        }
+    }
+
+    fn parse_struct_members_declaration(&mut self) -> Result<SymbolTableEntry, Box<dyn Error>> {
+        // TODO: Support nested structs
+        // TODO: Support arrays in structs
+        let data_type = self.parse_type()?;
+
+        if data_type == DataType::VOID {
+            return Err("Unable to define struct members with void type.".into());
+        }
+
+        let ident = self.match_token(TokenType::IDENT)?;
+
+        let mut sym = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            data_type,
+            0,
+            ident.lexeme.clone(),
+            0,
+            SymType::VARIABLE,
+            SymClass::MEMBER,
+        );
+
+        self.match_token(TokenType::SEMI)?;
+
+        match &self.current_token {
+            Some(token) => {
+                match token.token_type {
+                    TokenType::RBRACE => {
+                        // Let caller consume the RBRACE
+                    }
+                    _ => {
+                        // If we hit did not hit a RBRACE, we assume that there are more members
+                        let next_sym = self.parse_struct_members_declaration()?;
+                        sym.add_to_list(next_sym);
+                    }
+                }
+            }
+            None => return Err("Missing '}' after struct declaration".into()),
+        }
+
+        Ok(sym)
+    }
+
     fn parse_func_declaration(
         &mut self,
         ident: Token,
         data_type: DataType,
     ) -> Result<Box<ASTnode>, Box<dyn Error>> {
         // We add the symbol here so that recursive calls work
-        let sym = self.add_global_symbol(ident.lexeme, data_type, 0, SymType::FUNCTION, 0);
+        let sym = self.global_symbol_table.add_symbol(
+            ident.lexeme,
+            data_type,
+            0,
+            SymType::FUNCTION,
+            0,
+            SymClass::GLOBAL,
+        );
 
         // TODO: Support defining parameters
         self.match_token(TokenType::LPAREN)?;
@@ -335,7 +497,10 @@ mod tests {
 
         assert!(expr.is_none());
 
-        match parser.global_symbol_table.get("x") {
+        match parser
+            .global_symbol_table
+            .find_symbol("x", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INT);
@@ -354,7 +519,10 @@ mod tests {
 
         assert!(expr.is_none());
 
-        match parser.global_symbol_table.get("x") {
+        match parser
+            .global_symbol_table
+            .find_symbol("x", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INT);
@@ -364,7 +532,10 @@ mod tests {
             None => panic!("New symbol table entry for x was not found"),
         }
 
-        match parser.global_symbol_table.get("y") {
+        match parser
+            .global_symbol_table
+            .find_symbol("y", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INT);
@@ -399,7 +570,10 @@ mod tests {
 
         assert!(expr.is_none());
 
-        match parser.global_symbol_table.get("x") {
+        match parser
+            .global_symbol_table
+            .find_symbol("x", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INTPTR);
@@ -418,7 +592,10 @@ mod tests {
 
         assert!(expr.is_none());
 
-        match parser.global_symbol_table.get("x") {
+        match parser
+            .global_symbol_table
+            .find_symbol("x", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INTPTR);
@@ -428,7 +605,10 @@ mod tests {
             None => panic!("New symbol table entry not found for x"),
         }
 
-        match parser.global_symbol_table.get("y") {
+        match parser
+            .global_symbol_table
+            .find_symbol("y", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INTPTR);
@@ -449,13 +629,16 @@ mod tests {
             ASTop::FUNCTION,
             ASTnode::new_unary(
                 ASTop::RETURN,
-                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
                 DataType::NONE,
             ),
             DataType::NONE,
         );
         match_ast_node(Some(&expr), expected);
-        match parser.global_symbol_table.get("main") {
+        match parser
+            .global_symbol_table
+            .find_symbol("main", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INT);
@@ -496,13 +679,16 @@ mod tests {
             ASTop::FUNCTION,
             ASTnode::new_unary(
                 ASTop::RETURN,
-                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
                 DataType::NONE,
             ),
             DataType::NONE,
         );
         match_ast_node(Some(&expr), expected);
-        match parser.global_symbol_table.get("test") {
+        match parser
+            .global_symbol_table
+            .find_symbol("test", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INT);
@@ -532,13 +718,16 @@ mod tests {
             ASTop::FUNCTION,
             ASTnode::new_unary(
                 ASTop::RETURN,
-                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
                 DataType::NONE,
             ),
             DataType::NONE,
         );
         match_ast_node(Some(&expr), expected);
-        match parser.global_symbol_table.get("test") {
+        match parser
+            .global_symbol_table
+            .find_symbol("test", SymClass::GLOBAL)
+        {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
                 assert_eq!(new_sym.data_type, DataType::INT);
@@ -580,6 +769,128 @@ mod tests {
                     e.to_string(),
                     "Unable to define function parameters with void type."
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn parse_struct_definition() {
+        let mut scanner = Scanner::new_from_string(String::from("struct Person { int x; };"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        parser
+            .parse_global_declaration()
+            .expect("Failed to define struct");
+
+        match parser
+            .composite_symbol_table
+            .find_symbol("Person", SymClass::STRUCT)
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.name, "Person");
+                assert_eq!(sym.sym_type, SymType::STRUCT);
+                assert_eq!(sym.sym_class, SymClass::STRUCT);
+                match &sym.members {
+                    Some(member) => {
+                        let member = member.borrow();
+                        assert_eq!(member.name, "x");
+                        assert_eq!(member.sym_type, SymType::VARIABLE);
+                        assert_eq!(member.sym_class, SymClass::MEMBER);
+                    }
+                    None => {
+                        panic!("Struct member was not found.");
+                    }
+                }
+            }
+            None => {
+                panic!("Struct was not added to symbol table.");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_struct_definition_with_variable() {
+        let mut scanner =
+            Scanner::new_from_string(String::from("struct Person { int x; } person1;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        parser
+            .parse_global_declaration()
+            .expect("Failed to define struct");
+
+        let struct_sym = match parser
+            .composite_symbol_table
+            .find_symbol("Person", SymClass::STRUCT)
+        {
+            Some(sym) => {
+                let sym = Rc::clone(&sym);
+                assert_eq!(sym.borrow().name, "Person");
+                assert_eq!(sym.borrow().sym_type, SymType::STRUCT);
+                assert_eq!(sym.borrow().sym_class, SymClass::STRUCT);
+                match &sym.borrow().members {
+                    Some(member) => {
+                        let member = member.borrow();
+                        assert_eq!(member.name, "x");
+                        assert_eq!(member.sym_type, SymType::VARIABLE);
+                        assert_eq!(member.sym_class, SymClass::MEMBER);
+                    }
+                    None => {
+                        panic!("Struct member was not found.");
+                    }
+                }
+                sym
+            }
+            None => {
+                panic!("Struct was not added to symbol table.");
+            }
+        };
+
+        match parser
+            .global_symbol_table
+            .find_symbol("person1", SymClass::GLOBAL)
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.name, "person1");
+                assert_eq!(sym.sym_type, SymType::VARIABLE);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert!(Rc::ptr_eq(&struct_sym, sym.type_sym.as_ref().unwrap()));
+            }
+            None => {
+                panic!("Struct variable was not found in the symbol table.");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_struct_variable_declaration() {
+        let mut scanner = Scanner::new_from_string(String::from("struct Person person1;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let struct_sym = parser.composite_symbol_table.add_symbol(
+            "Person".to_string(),
+            DataType::NONE,
+            0,
+            SymType::STRUCT,
+            0,
+            SymClass::STRUCT,
+        );
+
+        parser
+            .parse_global_declaration()
+            .expect("Failed to define struct");
+
+        match parser
+            .global_symbol_table
+            .find_symbol("person1", SymClass::GLOBAL)
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.name, "person1");
+                assert_eq!(sym.sym_type, SymType::VARIABLE);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert!(Rc::ptr_eq(&struct_sym, sym.type_sym.as_ref().unwrap()));
+            }
+            None => {
+                panic!("Struct variable was not found in the symbol table.");
             }
         }
     }

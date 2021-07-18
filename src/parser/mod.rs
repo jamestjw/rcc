@@ -3,7 +3,6 @@
 
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
-use std::collections::HashMap;
 use std::error::Error;
 
 mod ast_node;
@@ -23,7 +22,8 @@ pub use symbol_table::*;
 pub struct Parser<'a> {
     token_generator: &'a mut Scanner,
     current_token: Option<Token>,
-    pub global_symbol_table: HashMap<String, Rc<RefCell<SymbolTableEntry>>>,
+    pub global_symbol_table: SymbolTable,
+    pub composite_symbol_table: SymbolTable,
     pub current_func_sym: Option<Rc<RefCell<SymbolTableEntry>>>, // Current function that we are parsing
 }
 
@@ -33,7 +33,8 @@ impl<'a> Parser<'a> {
         Ok(Parser {
             token_generator,
             current_token: Some(first_token),
-            global_symbol_table: HashMap::new(),
+            global_symbol_table: SymbolTable::new(),
+            composite_symbol_table: SymbolTable::new(),
             current_func_sym: None,
         })
     }
@@ -74,9 +75,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn is_token_type(&mut self, token_type: TokenType) -> Result<bool, String> {
+    pub fn is_token_type(&self, token_type: TokenType) -> Result<bool, String> {
         match &self.current_token {
             Some(tok) => Ok(tok.token_type == token_type),
+            None => Err("Unexpected end of input.".into()),
+        }
+    }
+
+    pub fn current_token_type(&self) -> Result<TokenType, String> {
+        match &self.current_token {
+            Some(tok) => Ok(tok.token_type),
             None => Err("Unexpected end of input.".into()),
         }
     }
@@ -131,27 +139,6 @@ impl<'a> Parser<'a> {
         }
 
         Ok(indirection_count)
-    }
-
-    pub fn add_global_symbol(
-        &mut self,
-        lexeme: String,
-        data_type: DataType,
-        initial_value: i32,
-        sym_type: SymType,
-        size: u32,
-    ) -> Rc<RefCell<SymbolTableEntry>> {
-        // TODO: Is there a reasonable way to avoid cloning the lexeme?
-        let sym = Rc::new(RefCell::new(SymbolTableEntry::new(
-            data_type,
-            initial_value,
-            lexeme.clone(),
-            size,
-            sym_type,
-            SymClass::GLOBAL,
-        )));
-        self.global_symbol_table.insert(lexeme, Rc::clone(&sym));
-        sym
     }
 }
 

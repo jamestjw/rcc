@@ -25,6 +25,7 @@ enum_str! {
         CHAR,
         INT,
         VOID,
+        STRUCT,
         SEMI,
         RETURN,
         BANG,
@@ -32,6 +33,7 @@ enum_str! {
         AMPERSAND,
         LBRACKET,
         RBRACKET,
+        DOT,
     }
 }
 
@@ -54,6 +56,7 @@ impl fmt::Display for TokenType {
             TokenType::CHAR => write!(f, "char"),
             TokenType::INT => write!(f, "int"),
             TokenType::VOID => write!(f, "void"),
+            TokenType::STRUCT => write!(f, "struct"),
             TokenType::SEMI => write!(f, ";"),
             TokenType::RETURN => write!(f, "return"),
             TokenType::BANG => write!(f, "!"),
@@ -61,6 +64,7 @@ impl fmt::Display for TokenType {
             TokenType::AMPERSAND => write!(f, "&"),
             TokenType::LBRACKET => write!(f, "["),
             TokenType::RBRACKET => write!(f, "]"),
+            TokenType::DOT => write!(f, "."),
         }
     }
 }

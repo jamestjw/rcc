@@ -54,12 +54,13 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
     // TODO: Remove this after linking standard library
     // We are manually adding the function symbol to allow us to
     // avoid parsing errors
-    let printint_sym = parser.add_global_symbol(
+    let printint_sym = parser.global_symbol_table.add_symbol(
         "printint".to_string(),
         DataType::VOID,
         0,
         SymType::FUNCTION,
         0,
+        SymClass::GLOBAL,
     );
     printint_sym.borrow_mut().add_member(SymbolTableEntry::new(
         DataType::INT,
@@ -70,12 +71,13 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         SymClass::PARAM,
     ));
 
-    let printchar_sym = parser.add_global_symbol(
+    let printchar_sym = parser.global_symbol_table.add_symbol(
         "printchar".to_string(),
         DataType::VOID,
         0,
         SymType::FUNCTION,
         0,
+        SymClass::GLOBAL,
     );
     printchar_sym.borrow_mut().add_member(SymbolTableEntry::new(
         DataType::CHAR,
@@ -86,12 +88,13 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         SymClass::PARAM,
     ));
 
-    let printstr_sym = parser.add_global_symbol(
+    let printstr_sym = parser.global_symbol_table.add_symbol(
         "printstr".to_string(),
         DataType::VOID,
         0,
         SymType::FUNCTION,
         0,
+        SymClass::GLOBAL,
     );
     printstr_sym.borrow_mut().add_member(SymbolTableEntry::new(
         DataType::CHARPTR,
@@ -102,7 +105,7 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         SymClass::PARAM,
     ));
 
-    let stmts = match parser.parse_global_declarations() {
+    let stmts = match parser.parse_global_statements() {
         Ok(stmt) => stmt,
         Err(err) => {
             return Err(format!(
@@ -114,9 +117,13 @@ pub fn compile(input_fname: &Path, output_fname: &Path) -> Result<(), String> {
         }
     };
 
-    crate::debug::print_tree(&stmts, 0);
+    // crate::debug::print_tree(&stmts, 0);
+    // crate::debug::print_symbol_table(&parser.global_symbol_table, 0);
 
     let mut generator = code_generation::x86_64::Generator_x86_64::new();
+    // Preprocessing is done in this sequence as global
+    //  symbols may reference symbols in the composite_symbol_table
+    generator.preprocess_symbols(&parser.composite_symbol_table);
     generator.preprocess_symbols(&parser.global_symbol_table);
     generator.gen_glob_syms(&parser.global_symbol_table);
     generator.gen_strlits(&scanner.string_table);

@@ -61,6 +61,7 @@ impl Scanner {
                 '&' => TokenType::AMPERSAND,
                 '[' => TokenType::LBRACKET,
                 ']' => TokenType::RBRACKET,
+                '.' => TokenType::DOT,
                 '0'..='9' => {
                     int_value = self.scan_int(c) as i32;
                     TokenType::INTLIT
@@ -181,8 +182,31 @@ impl Scanner {
     // To be called the current character is the quotation mark
     // that denotes the start of the char literal.
     fn scan_char(&mut self) -> Result<u8, Box<dyn Error>> {
-        let c = match self.next_char() {
-            Some(c) => c as u8,
+        let c = match self._next_char() {
+            Some(c) => {
+                if c != '\\' {
+                    c as u8
+                } else {
+                    let res = match self._next_char() {
+                        Some(c) => {
+                            match c {
+                                // TODO: Handle other characters
+                                '0' => '\0',
+                                'n' => '\n',
+                                _ => {
+                                    return Err(format!("Unknown token '{}' found after '\\' while parsing char literal.", c).into());
+                                }
+                            }
+                        }
+                        None => {
+                            return Err(
+                                "Unexpected end of input stream while parsing char literal".into(),
+                            );
+                        }
+                    };
+                    res as u8
+                }
+            }
             None => {
                 return Err("Unexpected end of input stream while parsing char literal".into());
             }
@@ -235,6 +259,9 @@ impl Scanner {
         }
         if lexeme.starts_with('r') && lexeme == "return" {
             return TokenType::RETURN;
+        }
+        if lexeme.starts_with('s') && lexeme == "struct" {
+            return TokenType::STRUCT;
         }
         if lexeme.starts_with('v') && lexeme == "void" {
             return TokenType::VOID;

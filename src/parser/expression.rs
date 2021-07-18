@@ -37,7 +37,6 @@ impl<'a> Parser<'a> {
                     match right.op {
                         ASTop::IDENT | ASTop::OFFSET => {
                             right.rvalue = false;
-                            ASTnode::new_unary(op, right, data_type)
                         }
 
                         _ => {
@@ -46,9 +45,8 @@ impl<'a> Parser<'a> {
                             );
                         }
                     }
-                } else {
-                    ASTnode::new_unary(op, right, data_type)
                 }
+                ASTnode::new_unary(op, right, data_type)
             }
             None => self.primary_expr()?,
         };
@@ -100,7 +98,55 @@ impl<'a> Parser<'a> {
                         self.match_token(TokenType::RBRACKET)?;
                         let arr_ptr_type = left.data_type;
                         let arr_data_type = pointer_to(arr_ptr_type)?;
+                        left.rvalue = true;
                         left = ASTnode::new_boxed(ASTop::OFFSET, left, index_node, arr_data_type);
+                    }
+                    TokenType::DOT => {
+                        // TODO: Consider relaxing this first condition, as we only need to make sure
+                        // that there is struct symentry, this will be necessary when we want to allow
+                        // chaining of the DOT operator.
+                        if left.op != ASTop::IDENT {
+                            return Err(format!(
+                                "Member access on '{}' is invalid, it is only possible with struct variables.",
+                                left.op.name()
+                            )
+                            .into());
+                        }
+
+                        // Given the ASTop, the symtable entry should always be present, hence this is safe
+                        let struct_var_sym = Rc::clone(left.symtable_entry.as_ref().unwrap());
+                        let struct_var_name = &struct_var_sym.borrow().name;
+                        if struct_var_sym.borrow().data_type != DataType::STRUCT {
+                            return Err(format!(
+                                "Member access on '{}' is invalid, it is only possible with struct variables.",
+                                struct_var_name
+                            )
+                            .into());
+                        }
+                        let struct_sym =
+                            Rc::clone(struct_var_sym.borrow().type_sym.as_ref().unwrap());
+
+                        // Consume the DOT and IDENT containing the member name
+                        self.consume()?;
+                        let member_tok = self.match_token(TokenType::IDENT)?;
+
+                        match struct_sym.borrow().search_member(&member_tok.lexeme) {
+                            Some(member_sym) => {
+                                left = ASTnode::new_unary(
+                                    ASTop::MEMBER,
+                                    left,
+                                    member_sym.borrow().data_type,
+                                );
+                                left.symtable_entry = Some(member_sym);
+                            }
+                            None => {
+                                return Err(format!(
+                                    "Invalid access to member '{}' in '{}'.",
+                                    &member_tok.lexeme, struct_var_name
+                                )
+                                .into());
+                            }
+                        };
                     }
                     _ => {
                         self.consume()?;
@@ -129,22 +175,26 @@ impl<'a> Parser<'a> {
 
                 let mut right = self.expr_by_precedence(r_bp)?;
 
-                if op_tok_type == TokenType::ASSIGN {
+                let op = token_type_to_binary_op(op_tok_type);
+
+                // TODO: Check that data type of operands are valid
+                if op == ASTop::ASSIGN {
+                    match left.op {
+                        ASTop::IDENT | ASTop::DEREF | ASTop::OFFSET | ASTop::MEMBER => {}
+                        _ => {
+                            return Err(format!("Unable to assign to {}.", left.op.name()).into());
+                        }
+                    };
                     right.rvalue = true;
+                    left.rvalue = false;
                 } else {
                     left.rvalue = true;
                     right.rvalue = true;
                 }
-
                 let resulting_data_type = left.data_type;
 
                 // TODO: Data type of resulting node should be the wider type
-                left = ASTnode::new_boxed(
-                    token_type_to_binary_op(op_tok_type),
-                    left,
-                    right,
-                    resulting_data_type,
-                );
+                left = ASTnode::new_boxed(op, left, right, resulting_data_type);
             } else {
                 break;
             }
@@ -172,8 +222,11 @@ impl<'a> Parser<'a> {
                     };
 
                     if symtable_entry.is_none() {
-                        symtable_entry = match self.global_symbol_table.get(&token.lexeme) {
-                            Some(new_sym) => Some(Rc::clone(new_sym)),
+                        symtable_entry = match self
+                            .global_symbol_table
+                            .find_symbol(&token.lexeme, SymClass::GLOBAL)
+                        {
+                            Some(new_sym) => Some(new_sym),
                             None => {
                                 return Err(format!(
                                     "Referencing undefined variable {}.",
@@ -195,11 +248,7 @@ impl<'a> Parser<'a> {
                 }
                 TokenType::INTLIT => {
                     let int_value = self.consume()?.int_value;
-                    let data_type = match int_value {
-                        _ if int_value >= 0 && int_value < 256 => DataType::CHAR,
-                        _ => DataType::INT,
-                    };
-                    Ok(ASTnode::new_leaf(ASTop::INTLIT, int_value, data_type))
+                    Ok(ASTnode::new_leaf(ASTop::INTLIT, int_value, DataType::INT))
                 }
                 TokenType::STRLIT => {
                     let string_table_id = self.consume()?.string_table_id;
@@ -324,6 +373,7 @@ fn postfix_binding_power(op: TokenType) -> Option<(u8, ())> {
         // For function calls
         TokenType::LPAREN => (100, ()),
         TokenType::LBRACKET => (100, ()),
+        TokenType::DOT => (100, ()),
         _ => return None,
     };
     Some(res)
@@ -344,6 +394,7 @@ fn token_type_to_binary_op(token_type: TokenType) -> ASTop {
 
 fn token_type_to_postfix_op(token_type: TokenType) -> ASTop {
     match token_type {
+        TokenType::DOT => ASTop::MEMBER,
         _ => {
             panic!("Unknown postfix op from token type: {}", token_type);
         }
@@ -372,9 +423,9 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
-            ASTnode::new_leaf(ASTop::INTLIT, 51, DataType::CHAR),
-            ASTnode::new_leaf(ASTop::INTLIT, 24, DataType::CHAR),
-            DataType::CHAR,
+            ASTnode::new_leaf(ASTop::INTLIT, 51, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 24, DataType::INT),
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -387,9 +438,9 @@ mod tests {
         let expr = parser.expr_by_precedence(0).unwrap();
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
-            ASTnode::new_leaf(ASTop::INTLIT, 51, DataType::CHAR),
-            ASTnode::new_leaf(ASTop::INTLIT, 24, DataType::CHAR),
-            DataType::CHAR,
+            ASTnode::new_leaf(ASTop::INTLIT, 51, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 24, DataType::INT),
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -453,14 +504,14 @@ mod tests {
 
         let expected = ASTnode::new_boxed(
             ASTop::ADD,
-            ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::CHAR),
+            ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
             ASTnode::new_boxed(
                 ASTop::MULTIPLY,
-                ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::CHAR),
-                ASTnode::new_leaf(ASTop::INTLIT, 3, DataType::CHAR),
-                DataType::CHAR,
+                ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::INT),
+                ASTnode::new_leaf(ASTop::INTLIT, 3, DataType::INT),
+                DataType::INT,
             ),
-            DataType::CHAR,
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -476,17 +527,17 @@ mod tests {
             ASTop::MINUS,
             ASTnode::new_boxed(
                 ASTop::DIVIDE,
-                ASTnode::new_leaf(ASTop::INTLIT, 50, DataType::CHAR),
-                ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::CHAR),
-                DataType::CHAR,
+                ASTnode::new_leaf(ASTop::INTLIT, 50, DataType::INT),
+                ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::INT),
+                DataType::INT,
             ),
             ASTnode::new_boxed(
                 ASTop::MULTIPLY,
-                ASTnode::new_leaf(ASTop::INTLIT, 20, DataType::CHAR),
-                ASTnode::new_leaf(ASTop::INTLIT, 4, DataType::CHAR),
-                DataType::CHAR,
+                ASTnode::new_leaf(ASTop::INTLIT, 20, DataType::INT),
+                ASTnode::new_leaf(ASTop::INTLIT, 4, DataType::INT),
+                DataType::INT,
             ),
-            DataType::CHAR,
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -502,17 +553,17 @@ mod tests {
             ASTop::MULTIPLY,
             ASTnode::new_boxed(
                 ASTop::DIVIDE,
-                ASTnode::new_leaf(ASTop::INTLIT, 50, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 50, DataType::INT),
                 ASTnode::new_boxed(
                     ASTop::MINUS,
-                    ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::CHAR),
-                    ASTnode::new_leaf(ASTop::INTLIT, 20, DataType::CHAR),
-                    DataType::CHAR,
+                    ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 20, DataType::INT),
+                    DataType::INT,
                 ),
-                DataType::CHAR,
+                DataType::INT,
             ),
-            ASTnode::new_leaf(ASTop::INTLIT, 4, DataType::CHAR),
-            DataType::CHAR,
+            ASTnode::new_leaf(ASTop::INTLIT, 4, DataType::INT),
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -522,13 +573,20 @@ mod tests {
     fn parse_simple_assignment() {
         let mut scanner = Scanner::new_from_string(String::from("x = 5;"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let sym = parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE, 0);
+        let sym = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
         let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
             ASTop::ASSIGN,
             ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
-            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::CHAR),
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
             DataType::INT,
         );
 
@@ -548,15 +606,21 @@ mod tests {
     fn parse_simple_char_assignment() {
         let mut scanner = Scanner::new_from_string(String::from("x = 'c';"));
         let mut parser = Parser::new(&mut scanner).unwrap();
-        let sym =
-            parser.add_global_symbol("x".to_string(), DataType::CHAR, 0, SymType::VARIABLE, 0);
+        let sym = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
         let expr = parser.expr_by_precedence(0).unwrap();
 
         let expected = ASTnode::new_boxed(
             ASTop::ASSIGN,
-            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::CHAR),
-            ASTnode::new_leaf(ASTop::INTLIT, 99, DataType::CHAR),
-            DataType::CHAR,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 99, DataType::INT),
+            DataType::INT,
         );
 
         match_ast_node(Some(&expr), expected);
@@ -575,12 +639,13 @@ mod tests {
     fn parse_bin_expr_funccall_with_one_arg() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name(5 + 2)"));
         let mut parser = Parser::new(&mut scanner)?;
-        let func_sym = parser.add_global_symbol(
+        let func_sym = parser.global_symbol_table.add_symbol(
             "fn_name".to_string(),
             DataType::INT,
             0,
             SymType::FUNCTION,
             0,
+            SymClass::GLOBAL,
         );
         let func_param_sym = SymbolTableEntry::new(
             // TODO: Parse datatype
@@ -601,9 +666,9 @@ mod tests {
                 ASTop::FUNCPARAM,
                 ASTnode::new_boxed(
                     ASTop::ADD,
-                    ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::CHAR),
-                    ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::CHAR),
-                    DataType::CHAR,
+                    ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::INT),
+                    DataType::INT,
                 ),
                 DataType::INT,
             ),
@@ -625,12 +690,13 @@ mod tests {
     fn parse_bin_expr_funccall_with_no_arg() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name()"));
         let mut parser = Parser::new(&mut scanner)?;
-        let sym = parser.add_global_symbol(
+        let sym = parser.global_symbol_table.add_symbol(
             "fn_name".to_string(),
             DataType::INT,
             0,
             SymType::FUNCTION,
             0,
+            SymClass::GLOBAL,
         );
         let expr = parser.expr_by_precedence(0)?;
 
@@ -655,12 +721,13 @@ mod tests {
     fn parse_bin_expr_funccall_with_var_as_arg() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name(var_name)"));
         let mut parser = Parser::new(&mut scanner)?;
-        let func_sym = parser.add_global_symbol(
+        let func_sym = parser.global_symbol_table.add_symbol(
             "fn_name".to_string(),
             DataType::INT,
             0,
             SymType::FUNCTION,
             0,
+            SymClass::GLOBAL,
         );
         let func_param_sym = SymbolTableEntry::new(
             // TODO: Parse datatype
@@ -673,12 +740,13 @@ mod tests {
         );
         func_sym.borrow_mut().add_member(func_param_sym);
 
-        let var_sym = parser.add_global_symbol(
+        let var_sym = parser.global_symbol_table.add_symbol(
             "var_name".to_string(),
             DataType::INT,
             0,
             SymType::VARIABLE,
             0,
+            SymClass::GLOBAL,
         );
         let expr = parser.expr_by_precedence(0)?;
 
@@ -722,12 +790,13 @@ mod tests {
     fn parse_bin_expr_funccall_with_two_args() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("fn_name(var_name, 2)"));
         let mut parser = Parser::new(&mut scanner)?;
-        let func_sym = parser.add_global_symbol(
+        let func_sym = parser.global_symbol_table.add_symbol(
             "fn_name".to_string(),
             DataType::INT,
             0,
             SymType::FUNCTION,
             0,
+            SymClass::GLOBAL,
         );
         let func_param_sym_1 = SymbolTableEntry::new(
             // TODO: Parse datatype
@@ -750,12 +819,13 @@ mod tests {
         );
         func_sym.borrow_mut().add_member(func_param_sym_2);
 
-        parser.add_global_symbol(
+        parser.global_symbol_table.add_symbol(
             "var_name".to_string(),
             DataType::INT,
             0,
             SymType::VARIABLE,
             0,
+            SymClass::GLOBAL,
         );
         let expr = parser.expr_by_precedence(0)?;
 
@@ -769,7 +839,7 @@ mod tests {
                     ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
                     DataType::INT,
                 ),
-                ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::CHAR),
+                ASTnode::new_leaf(ASTop::INTLIT, 2, DataType::INT),
                 DataType::INT,
             ),
             DataType::INT,
@@ -823,8 +893,14 @@ mod tests {
     fn parse_bin_expr_with_prefix_deref_assign() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("*x = 8;"));
         let mut parser = Parser::new(&mut scanner)?;
-        let sym =
-            parser.add_global_symbol("x".to_string(), DataType::INTPTR, 0, SymType::VARIABLE, 0);
+        let sym = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INTPTR,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
         let expr = parser.expr_by_precedence(0)?;
 
         let expected = ASTnode::new_boxed(
@@ -834,7 +910,7 @@ mod tests {
                 ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INTPTR),
                 DataType::INT,
             ),
-            ASTnode::new_leaf(ASTop::INTLIT, 8, DataType::CHAR),
+            ASTnode::new_leaf(ASTop::INTLIT, 8, DataType::INT),
             DataType::INT,
         );
 
@@ -855,10 +931,22 @@ mod tests {
     fn parse_bin_expr_with_deref_as_rvalue() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("x = *y;"));
         let mut parser = Parser::new(&mut scanner)?;
-        let sym_x =
-            parser.add_global_symbol("x".to_string(), DataType::INT, 0, SymType::VARIABLE, 0);
-        let sym_y =
-            parser.add_global_symbol("y".to_string(), DataType::INTPTR, 0, SymType::VARIABLE, 0);
+        let sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        let sym_y = parser.global_symbol_table.add_symbol(
+            "y".to_string(),
+            DataType::INTPTR,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
         let expr = parser.expr_by_precedence(0)?;
 
         let expected = ASTnode::new_boxed(
@@ -898,10 +986,22 @@ mod tests {
     fn parse_bin_expr_with_address_taking_of_variable() -> Result<(), Box<dyn Error>> {
         let mut scanner = Scanner::new_from_string(String::from("x = &y;"));
         let mut parser = Parser::new(&mut scanner)?;
-        let sym_x =
-            parser.add_global_symbol("x".to_string(), DataType::INTPTR, 0, SymType::VARIABLE, 0);
-        let sym_y =
-            parser.add_global_symbol("y".to_string(), DataType::INT, 0, SymType::VARIABLE, 0);
+        let sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INTPTR,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        let sym_y = parser.global_symbol_table.add_symbol(
+            "y".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
         let expr = parser.expr_by_precedence(0)?;
 
         let expected = ASTnode::new_boxed(
@@ -932,6 +1032,165 @@ mod tests {
             }
             None => {
                 panic!("Right ASTnode does not contain reference to symtable entry.");
+            }
+        };
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_assignation_to_struct_member() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("person1.x = 5;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let struct_sym = parser.composite_symbol_table.add_symbol(
+            "Person".to_string(),
+            DataType::NONE,
+            0,
+            SymType::STRUCT,
+            0,
+            SymClass::STRUCT,
+        );
+
+        let struct_member_sym = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            DataType::INT,
+            0,
+            String::from("x"),
+            0,
+            SymType::VARIABLE,
+            SymClass::MEMBER,
+        );
+        struct_sym.borrow_mut().add_member(struct_member_sym);
+
+        let sym_person1 = parser.global_symbol_table.add_symbol(
+            "person1".to_string(),
+            DataType::STRUCT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        sym_person1.borrow_mut().type_sym = Some(Rc::clone(&struct_sym));
+
+        let expr = parser.expr_by_precedence(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_unary(
+                ASTop::MEMBER,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::STRUCT),
+                DataType::INT,
+            ),
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            DataType::INT,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        let member_node = expr.left.unwrap();
+
+        match member_node.symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(
+                    struct_sym.borrow().members.as_ref().unwrap(),
+                    &s
+                ));
+            }
+            None => {
+                panic!("Left ASTnode does not contain reference to symtable entry.");
+            }
+        };
+
+        match member_node.left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym_person1, &s));
+            }
+            None => {
+                panic!("Left ASTnode does not contain reference to symtable entry.");
+            }
+        };
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_access_struct_member_as_rvalue() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("y = person1.x;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let struct_sym = parser.composite_symbol_table.add_symbol(
+            "Person".to_string(),
+            DataType::NONE,
+            0,
+            SymType::STRUCT,
+            0,
+            SymClass::STRUCT,
+        );
+
+        let struct_member_sym = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            DataType::INT,
+            0,
+            String::from("x"),
+            0,
+            SymType::VARIABLE,
+            SymClass::MEMBER,
+        );
+        struct_sym.borrow_mut().add_member(struct_member_sym);
+
+        let _sym_y = parser.global_symbol_table.add_symbol(
+            "y".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let sym_person1 = parser.global_symbol_table.add_symbol(
+            "person1".to_string(),
+            DataType::STRUCT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        sym_person1.borrow_mut().type_sym = Some(Rc::clone(&struct_sym));
+
+        let expr = parser.expr_by_precedence(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_unary(
+                ASTop::MEMBER,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::STRUCT),
+                DataType::INT,
+            ),
+            DataType::INT,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        let member_node = expr.right.unwrap();
+
+        match member_node.symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(
+                    struct_sym.borrow().members.as_ref().unwrap(),
+                    &s
+                ));
+            }
+            None => {
+                panic!("Left ASTnode does not contain reference to symtable entry.");
+            }
+        };
+
+        match member_node.left.unwrap().symtable_entry {
+            Some(s) => {
+                assert!(Rc::ptr_eq(&sym_person1, &s));
+            }
+            None => {
+                panic!("Left ASTnode does not contain reference to symtable entry.");
             }
         };
 

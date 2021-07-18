@@ -28,6 +28,7 @@ enum_str! {
         DEREF,
         ADDR,
         OFFSET,
+        MEMBER,
     }
 }
 
