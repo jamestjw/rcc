@@ -14,6 +14,7 @@ use std::path::Path;
 
 // Registers to assign params to
 const PARAM_REGS: [&'static str; 6] = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
+const PTR_SIZE: u32 = 8;
 
 enum Operand {
     Int(i32),
@@ -373,11 +374,18 @@ impl Generator for Generator_x86_64 {
                     // Global variables can be referred directly to by their names
                     entry.posn = SymPosition::Label(sym_name.clone());
 
-                    let entry_size = match &entry.type_sym {
-                        Some(sym) => sym.borrow().size,
+                    entry.size = match &entry.type_sym {
+                        Some(sym) => {
+                            // We only copy the size from the symbol if this variable
+                            // is not a pointer to that data type.
+                            if entry.data_type.is_pointer() {
+                                PTR_SIZE
+                            } else {
+                                sym.borrow().size
+                            }
+                        }
                         None => self.data_type_to_size(entry.data_type),
                     };
-                    entry.size = entry_size;
                 }
                 SymType::FUNCTION => {
                     // Functions can be referred directly to by their names
@@ -483,13 +491,12 @@ impl Generator for Generator_x86_64 {
         match data_type {
             DataType::INT => 4,
             DataType::CHAR => 1,
-            DataType::INTPTR => 8,
-            DataType::CHARPTR => 8,
+            DataType::INTPTR => PTR_SIZE,
+            DataType::CHARPTR => PTR_SIZE,
+            DataType::STRUCTPTR => PTR_SIZE,
             DataType::VOID => 0,
             DataType::NONE => 0,
-            _ => {
-                panic!("Unknown size for {} type.", data_type.name());
-            }
+            DataType::STRUCT => 0,
         }
     }
 

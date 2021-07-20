@@ -28,7 +28,8 @@ enum_str! {
         DEREF,
         ADDR,
         OFFSET,
-        MEMBER,
+        MEMBER, // Access member of struct
+        PTRMEMBER, // Access member of struct via a pointer
     }
 }
 

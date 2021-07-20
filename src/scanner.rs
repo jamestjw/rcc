@@ -49,7 +49,16 @@ impl Scanner {
             Some(c) => match c {
                 '=' => TokenType::ASSIGN,
                 '+' => TokenType::PLUS,
-                '-' => TokenType::MINUS,
+                '-' => match self.next_char() {
+                    Some(c) => match c {
+                        '>' => TokenType::ARROW,
+                        _ => {
+                            self.putback_char(c);
+                            TokenType::MINUS
+                        }
+                    },
+                    None => TokenType::EOF,
+                },
                 '*' => TokenType::STAR,
                 '/' => TokenType::SLASH,
                 ';' => TokenType::SEMI,

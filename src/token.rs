@@ -34,6 +34,7 @@ enum_str! {
         LBRACKET,
         RBRACKET,
         DOT,
+        ARROW,
     }
 }
 
@@ -65,6 +66,7 @@ impl fmt::Display for TokenType {
             TokenType::LBRACKET => write!(f, "["),
             TokenType::RBRACKET => write!(f, "]"),
             TokenType::DOT => write!(f, "."),
+            TokenType::ARROW => write!(f, "->"),
         }
     }
 }

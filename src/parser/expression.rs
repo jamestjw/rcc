@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
                         left.rvalue = true;
                         left = ASTnode::new_boxed(ASTop::OFFSET, left, index_node, arr_data_type);
                     }
-                    TokenType::DOT => {
+                    TokenType::DOT | TokenType::ARROW => {
                         // TODO: Consider relaxing this first condition, as we only need to make sure
                         // that there is struct symentry, this will be necessary when we want to allow
                         // chaining of the DOT operator.
@@ -116,24 +116,37 @@ impl<'a> Parser<'a> {
                         // Given the ASTop, the symtable entry should always be present, hence this is safe
                         let struct_var_sym = Rc::clone(left.symtable_entry.as_ref().unwrap());
                         let struct_var_name = &struct_var_sym.borrow().name;
-                        if struct_var_sym.borrow().data_type != DataType::STRUCT {
+                        if op_tok_type == TokenType::DOT
+                            && struct_var_sym.borrow().data_type != DataType::STRUCT
+                        {
                             return Err(format!(
                                 "Member access on '{}' is invalid, it is only possible with struct variables.",
                                 struct_var_name
                             )
                             .into());
                         }
+
+                        if op_tok_type == TokenType::ARROW
+                            && struct_var_sym.borrow().data_type != DataType::STRUCTPTR
+                        {
+                            return Err(format!(
+                                "Member access on '{}' is invalid, it is only possible with struct pointer variables.",
+                                struct_var_name
+                            )
+                            .into());
+                        }
+
                         let struct_sym =
                             Rc::clone(struct_var_sym.borrow().type_sym.as_ref().unwrap());
 
-                        // Consume the DOT and IDENT containing the member name
+                        // Consume the DOT/ARROW and IDENT containing the member name
                         self.consume()?;
                         let member_tok = self.match_token(TokenType::IDENT)?;
 
                         match struct_sym.borrow().search_member(&member_tok.lexeme) {
                             Some(member_sym) => {
                                 left = ASTnode::new_unary(
-                                    ASTop::MEMBER,
+                                    token_type_to_postfix_op(op_tok_type),
                                     left,
                                     member_sym.borrow().data_type,
                                 );
@@ -180,7 +193,11 @@ impl<'a> Parser<'a> {
                 // TODO: Check that data type of operands are valid
                 if op == ASTop::ASSIGN {
                     match left.op {
-                        ASTop::IDENT | ASTop::DEREF | ASTop::OFFSET | ASTop::MEMBER => {}
+                        ASTop::IDENT
+                        | ASTop::DEREF
+                        | ASTop::OFFSET
+                        | ASTop::MEMBER
+                        | ASTop::PTRMEMBER => {}
                         _ => {
                             return Err(format!("Unable to assign to {}.", left.op.name()).into());
                         }
@@ -374,6 +391,7 @@ fn postfix_binding_power(op: TokenType) -> Option<(u8, ())> {
         TokenType::LPAREN => (100, ()),
         TokenType::LBRACKET => (100, ()),
         TokenType::DOT => (100, ()),
+        TokenType::ARROW => (100, ()),
         _ => return None,
     };
     Some(res)
@@ -395,6 +413,7 @@ fn token_type_to_binary_op(token_type: TokenType) -> ASTop {
 fn token_type_to_postfix_op(token_type: TokenType) -> ASTop {
     match token_type {
         TokenType::DOT => ASTop::MEMBER,
+        TokenType::ARROW => ASTop::PTRMEMBER,
         _ => {
             panic!("Unknown postfix op from token type: {}", token_type);
         }

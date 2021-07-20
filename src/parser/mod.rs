@@ -146,6 +146,7 @@ fn to_pointer(data_type: DataType) -> Result<DataType, String> {
     match data_type {
         DataType::INT => Ok(DataType::INTPTR),
         DataType::CHAR => Ok(DataType::CHARPTR),
+        DataType::STRUCT => Ok(DataType::STRUCTPTR),
         _ => Err(format!(
             "Unable to convert {} type to a pointer.",
             data_type.name()

@@ -24,6 +24,16 @@ enum_str! {
         CHARPTR,
         VOID,
         STRUCT,
+        STRUCTPTR,
+    }
+}
+
+impl DataType {
+    pub fn is_pointer(&self) -> bool {
+        match self {
+            DataType::INTPTR | DataType::CHARPTR | DataType::STRUCTPTR => true,
+            _ => false,
+        }
     }
 }
 

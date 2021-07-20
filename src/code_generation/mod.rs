@@ -87,8 +87,12 @@ pub fn generate_code_for_node(
         ASTop::FUNCCALL => {
             return Some(generate_code_for_funccall(generator, node));
         }
-        ASTop::MEMBER => {
-            return Some(generate_code_for_struct_member_access(generator, node));
+        ASTop::MEMBER | ASTop::PTRMEMBER => {
+            return Some(generate_code_for_struct_member_access(
+                generator,
+                node,
+                node.op == ASTop::PTRMEMBER,
+            ));
         }
         ASTop::ASSIGN => {
             return Some(generate_code_for_assignation(generator, node));
@@ -149,42 +153,6 @@ pub fn generate_code_for_node(
                 left_reg
             }
         }
-        // ASTop::ASSIGN => {
-        //     // TODO: Consider putting this in a different function.
-
-        //     let data_size = generator.data_type_to_size(node.right.as_ref().unwrap().data_type);
-        //     Some(generator.assign_to_addr(left_reg.unwrap(), right_reg.unwrap(), data_size))
-
-        //     // match &node.left {
-        //     //     Some(left) => match left.op {
-        //     //         ASTop::IDENT => {
-        //     //             let sym = node
-        //     //                 .left
-        //     //                 .as_ref()
-        //     //                 .unwrap()
-        //     //                 .symtable_entry
-        //     //                 .as_ref()
-        //     //                 .unwrap()
-        //     //                 .borrow();
-
-        //     //             Some(generator.assign_glob_var(&sym, right_reg.unwrap()))
-        //     //         }
-
-        //     //         _ => {
-        //     //             let data_size =
-        //     //                 generator.data_type_to_size(node.right.as_ref().unwrap().data_type);
-        //     //             Some(generator.assign_to_addr(
-        //     //                 left_reg.unwrap(),
-        //     //                 right_reg.unwrap(),
-        //     //                 data_size,
-        //     //             ))
-        //     //         }
-        //     //     },
-        //     //     None => {
-        //     //         panic!("Left node should not be empty for ASTop::ASSIGN.");
-        //     //     }
-        //     // }
-        // }
         ASTop::ADDR => match &node.left {
             Some(left) => match left.op {
                 ASTop::IDENT => {
@@ -318,16 +286,26 @@ fn generate_code_for_funccall_param(
 fn generate_code_for_struct_member_access(
     generator: &mut impl Generator,
     node: &Box<ASTnode>,
+    by_pointer: bool,
 ) -> usize {
     let struct_base_node = node.left.as_ref().unwrap();
 
     let mut addr_reg = match struct_base_node.op {
         ASTop::IDENT => {
             // Safe as IDENT nodes always have symtable entries
-            generator.load_addr(&struct_base_node.symtable_entry.as_ref().unwrap().borrow())
+            if by_pointer {
+                // If we are accessing via a pointer, it suffices to load the variable itself
+                // to get the base address
+                generator.load_var(&struct_base_node.symtable_entry.as_ref().unwrap().borrow())
+            } else {
+                generator.load_addr(&struct_base_node.symtable_entry.as_ref().unwrap().borrow())
+            }
         }
         ASTop::MEMBER => {
             todo!("support chaining dot operator for struct member access");
+        }
+        ASTop::PTRMEMBER => {
+            todo!("support chaining arrow operator for struct member access");
         }
         _ => {
             panic!(

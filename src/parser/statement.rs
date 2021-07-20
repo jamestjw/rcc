@@ -243,7 +243,8 @@ impl<'a> Parser<'a> {
 
         match next_token {
             // Creating variable from previously defined struct
-            TokenType::IDENT => {
+            // Could be a pointer to a struct
+            TokenType::IDENT | TokenType::STAR => {
                 self.parse_struct_variable_declaration(&struct_name_tok.lexeme)?;
                 self.match_token(TokenType::SEMI)?;
                 Ok(())
@@ -274,7 +275,8 @@ impl<'a> Parser<'a> {
 
                 match next_token {
                     TokenType::SEMI => {}
-                    TokenType::IDENT => {
+                    // Could be defining a pointer to a struct
+                    TokenType::IDENT | TokenType::STAR => {
                         self.parse_struct_variable_declaration(&struct_name_tok.lexeme)?;
                     }
                     _ => {
@@ -303,6 +305,12 @@ impl<'a> Parser<'a> {
         &mut self,
         struct_name: &str,
     ) -> Result<(), Box<dyn Error>> {
+        let indirection_count = self.parse_indirection()?;
+        let mut data_type = DataType::STRUCT;
+        for _ in 0..indirection_count {
+            data_type = to_pointer(data_type)?;
+        }
+
         let ident = self.match_token(TokenType::IDENT)?;
         match self
             .composite_symbol_table
@@ -312,7 +320,7 @@ impl<'a> Parser<'a> {
                 // We add the symbol here so that recursive calls work
                 let sym = self.global_symbol_table.add_symbol(
                     ident.lexeme,
-                    DataType::STRUCT,
+                    data_type,
                     0,
                     SymType::VARIABLE,
                     0,

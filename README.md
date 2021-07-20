@@ -26,19 +26,7 @@ I will try to document the progress of this project as best as I can. I will mos
 - Return statements are required in main functions.
 - Declarations in functions (in the local scope) are not supported yet.
 - Assignation in declarations are not supported yet.
-```
 - Can only handle one level of indirection for now.
-
-Instead, only the below is supported.
-
-``` c
-struct Person
-{
-    char name[50];
-    float salary;
-};
-struct Person person1;
-```
 
 ## Tests
 To run all unit tests only
