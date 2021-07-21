@@ -30,6 +30,9 @@ enum_str! {
         OFFSET,
         MEMBER, // Access member of struct
         PTRMEMBER, // Access member of struct via a pointer
+        IF,
+        IFBODY,
+        UNARYMINUS,
     }
 }
 

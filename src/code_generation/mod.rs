@@ -69,6 +69,10 @@ pub trait Generator {
     fn move_to_position(&mut self, r: usize, posn: &SymPosition, data_size: u32);
     fn data_type_to_size(&self, data_type: DataType) -> u32;
     fn gen_strlits(&mut self, string_table: &StringTable);
+    fn new_label(&mut self) -> String;
+    fn gen_label(&mut self, s: &str);
+    fn jump_if_zero(&mut self, r: usize, label: &str);
+    fn jump_to_label(&mut self, label: &str);
 }
 
 // Generates the code for the ASTnode,
@@ -96,6 +100,10 @@ pub fn generate_code_for_node(
         }
         ASTop::ASSIGN => {
             return Some(generate_code_for_assignation(generator, node));
+        }
+        ASTop::IF => {
+            generate_code_if_statement(generator, node);
+            return None;
         }
         _ => {}
     }
@@ -194,6 +202,10 @@ pub fn generate_code_for_node(
             } else {
                 Some(addr_reg)
             }
+        }
+        ASTop::UNARYMINUS => {
+            let tmp_reg = generator.load_integer(-1);
+            Some(generator.multiply(left_reg.unwrap(), tmp_reg))
         }
         ASTop::NOOP | ASTop::GLUE => None,
         _ => {
@@ -373,4 +385,36 @@ fn generate_code_for_assignation(generator: &mut impl Generator, node: &Box<ASTn
     // TODO: Should we consider the size of the rvalue as well?
     let data_size = generator.data_type_to_size(node.left.as_ref().unwrap().data_type);
     generator.assign_to_addr(left_reg.unwrap(), right_reg.unwrap(), data_size)
+}
+
+fn generate_code_if_statement(generator: &mut impl Generator, node: &Box<ASTnode>) {
+    let false_label = generator.new_label();
+    let end_label = generator.new_label();
+    let cond_reg = match &node.as_ref().left {
+        Some(left) => generate_code_for_node(generator, left)
+            .expect("Evaluated conditional expression should have its value stored in a register."),
+        None => {
+            panic!("Conditional expression node is absent in IF statement ASTnode");
+        }
+    };
+    generator.jump_if_zero(cond_reg, &false_label);
+
+    match &node.as_ref().right {
+        Some(body) => {
+            if body.op != ASTop::IFBODY {
+                panic!("Expected IFBODY on the right hand of IF ASTnode.")
+            }
+            generate_code_for_node(generator, body.left.as_ref().expect("Left node of IFBODY should contain the node with the true clause of an if statement."));
+            generator.jump_to_label(&end_label);
+            generator.gen_label(&false_label);
+
+            if let Some(else_node) = body.right.as_ref() {
+                generate_code_for_node(generator, else_node);
+            }
+            generator.gen_label(&end_label);
+        }
+        None => {
+            panic!("If statement body is absent in IF statement ASTnode");
+        }
+    }
 }

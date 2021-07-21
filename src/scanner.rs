@@ -263,8 +263,15 @@ impl Scanner {
         if lexeme.starts_with('c') && lexeme == "char" {
             return TokenType::CHAR;
         }
-        if lexeme.starts_with('i') && lexeme == "int" {
-            return TokenType::INT;
+        if lexeme.starts_with('e') && lexeme == "else" {
+            return TokenType::ELSE;
+        }
+        if lexeme.starts_with('i') {
+            if lexeme == "int" {
+                return TokenType::INT;
+            } else if lexeme == "if" {
+                return TokenType::IF;
+            }
         }
         if lexeme.starts_with('r') && lexeme == "return" {
             return TokenType::RETURN;

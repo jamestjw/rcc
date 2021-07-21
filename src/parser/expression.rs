@@ -380,6 +380,7 @@ fn prefix_binding_power(op: TokenType) -> Option<((), u8)> {
     let res = match op {
         TokenType::STAR => ((), 90),
         TokenType::AMPERSAND => ((), 90),
+        TokenType::MINUS => ((), 90),
         _ => return None,
     };
     Some(res)
@@ -423,6 +424,7 @@ fn token_type_to_postfix_op(token_type: TokenType) -> ASTop {
 fn token_type_to_prefix_op(token_type: TokenType) -> ASTop {
     match token_type {
         TokenType::STAR => ASTop::DEREF,
+        TokenType::MINUS => ASTop::UNARYMINUS,
         TokenType::AMPERSAND => ASTop::ADDR,
         _ => {
             panic!("Unknown prefix op from token type: {}", token_type);

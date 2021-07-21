@@ -35,6 +35,8 @@ enum_str! {
         RBRACKET,
         DOT,
         ARROW,
+        IF,
+        ELSE,
     }
 }
 
@@ -67,6 +69,8 @@ impl fmt::Display for TokenType {
             TokenType::RBRACKET => write!(f, "]"),
             TokenType::DOT => write!(f, "."),
             TokenType::ARROW => write!(f, "->"),
+            TokenType::IF => write!(f, "if"),
+            TokenType::ELSE => write!(f, "else"),
         }
     }
 }

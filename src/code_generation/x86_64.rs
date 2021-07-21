@@ -42,6 +42,7 @@ impl fmt::Display for Operand {
 pub struct Generator_x86_64 {
     output_str: String,
     registers: Vec<Register>,
+    label_idx: u32,
 }
 
 impl Generator_x86_64 {
@@ -73,6 +74,7 @@ impl Generator_x86_64 {
                     String::from("r13b"),
                 ),
             ],
+            label_idx: 0,
         }
     }
 
@@ -519,6 +521,32 @@ impl Generator for Generator_x86_64 {
             Operand::Reg(self.reg_name(r)),
         );
         r
+    }
+
+    fn new_label(&mut self) -> String {
+        let label = format!(".L{}", self.label_idx);
+        self.label_idx += 1;
+        label
+    }
+
+    fn gen_label(&mut self, label: &str) {
+        self.output_str.push_str(&format!("{}:\n", label));
+    }
+
+    fn jump_if_zero(&mut self, r: usize, label: &str) {
+        self.gen_binary_op(
+            "testq",
+            Operand::Reg(self.reg_name(r)),
+            Operand::Reg(self.reg_name(r)),
+        );
+
+        self.free_register(r);
+
+        self.gen_unary_op("je", Operand::RawString(label.to_string()));
+    }
+
+    fn jump_to_label(&mut self, label: &str) {
+        self.gen_unary_op("jmp", Operand::RawString(label.to_string()));
     }
 }
 

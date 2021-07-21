@@ -39,12 +39,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // TODO: Turn this function into parse_global_declaration to
-    // eventually only handle var and func declarations
     pub fn parse_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
         let statement = match &self.current_token {
             Some(tok) => match tok.token_type {
                 TokenType::RETURN => self.parse_return()?,
+                TokenType::IF => self.parse_if_statement()?,
                 _ => {
                     let node = self.expr_by_precedence(0)?;
                     self.match_token(TokenType::SEMI)?;
@@ -90,7 +89,9 @@ impl<'a> Parser<'a> {
                         ),
                     },
                     None => {
-                        panic!("Unexpected error: No more tokens found in parse_statement.");
+                        panic!(
+                            "Unexpected error: No more tokens found in parse_global_declaration."
+                        );
                     }
                 }
             }
@@ -376,6 +377,44 @@ impl<'a> Parser<'a> {
         Ok(sym)
     }
 
+    fn parse_statements(
+        &mut self,
+        end_token_type: TokenType,
+        return_check: bool,
+    ) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        let mut tree: Option<Box<ASTnode>> = None;
+        // TODO: Is there a better way to track whether or not a return was included?
+        let mut last_op = ASTop::NOOP;
+
+        while self.current_token.as_ref().unwrap().token_type != end_token_type {
+            let node = self.parse_statement()?;
+            last_op = node.op;
+
+            match tree {
+                Some(original_tree) => {
+                    tree = Some(ASTnode::new_boxed(
+                        ASTop::GLUE,
+                        original_tree,
+                        node,
+                        DataType::NONE,
+                    ))
+                }
+                None => {
+                    tree = Some(node);
+                }
+            }
+        }
+
+        // TODO: Eventually we have to check if return statements were included
+        // in different branches of control flow statements, i.e. return statements
+        // will not always be last statement within a function
+        if return_check && last_op != ASTop::RETURN {
+            return Err("Return value must be provided in non-void function.".into());
+        }
+
+        Ok(tree.unwrap_or_else(|| ASTnode::new_noop()))
+    }
+
     fn parse_func_declaration(
         &mut self,
         ident: Token,
@@ -402,40 +441,11 @@ impl<'a> Parser<'a> {
         self.match_token(TokenType::RPAREN)?;
         self.match_token(TokenType::LBRACE)?;
 
-        let mut tree: Option<Box<ASTnode>> = None;
-
         // Point to the symbol of the function we are parsing so that it can be referenced
         // when we parse the body of the function.
         self.current_func_sym = Some(Rc::clone(&sym));
 
-        // TODO: Is there a better way to track whether or not a return was included?
-        let mut last_op = ASTop::NOOP;
-
-        while self.current_token.as_ref().unwrap().token_type != TokenType::RBRACE {
-            let node = self.parse_statement()?;
-            last_op = node.op;
-
-            match tree {
-                Some(original_tree) => {
-                    tree = Some(ASTnode::new_boxed(
-                        ASTop::GLUE,
-                        original_tree,
-                        node,
-                        DataType::NONE,
-                    ))
-                }
-                None => {
-                    tree = Some(node);
-                }
-            }
-        }
-
-        // TODO: Eventually we have to check if return statements were included
-        // in different branches of control flow statements, i.e. return statements
-        // will not always be last statement within a function
-        if data_type != DataType::VOID && last_op != ASTop::RETURN {
-            return Err("Return value must be provided in non-void function.".into());
-        }
+        let tree = self.parse_statements(TokenType::RBRACE, data_type != DataType::VOID)?;
 
         // Since we are done parsing the body of the function, we remove the pointer
         // to the symbol of the current function.
@@ -443,11 +453,7 @@ impl<'a> Parser<'a> {
 
         self.match_token(TokenType::RBRACE)?;
 
-        let mut fn_node = ASTnode::new_unary(
-            ASTop::FUNCTION,
-            tree.unwrap_or_else(|| ASTnode::new_noop()),
-            DataType::NONE,
-        );
+        let mut fn_node = ASTnode::new_unary(ASTop::FUNCTION, tree, DataType::NONE);
 
         fn_node.symtable_entry = Some(sym);
 
@@ -490,6 +496,33 @@ impl<'a> Parser<'a> {
         ));
 
         Ok(ret_node)
+    }
+
+    pub fn parse_if_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        self.match_token(TokenType::IF)?;
+        self.match_token(TokenType::LPAREN)?;
+        let cond_expr = self.expr_by_precedence(0)?;
+        self.match_token(TokenType::RPAREN)?;
+        self.match_token(TokenType::LBRACE)?;
+        let if_body = self.parse_statements(TokenType::RBRACE, false)?;
+        self.match_token(TokenType::RBRACE)?;
+
+        let mut body_node = ASTnode::new_unary(ASTop::IFBODY, if_body, DataType::NONE);
+
+        if self.current_token_type()? == TokenType::ELSE {
+            self.match_token(TokenType::ELSE)?;
+            self.match_token(TokenType::LBRACE)?;
+            let else_body = self.parse_statements(TokenType::RBRACE, false)?;
+            self.match_token(TokenType::RBRACE)?;
+            body_node.right = Some(else_body);
+        }
+
+        Ok(ASTnode::new_boxed(
+            ASTop::IF,
+            cond_expr,
+            body_node,
+            DataType::NONE,
+        ))
     }
 }
 
@@ -901,5 +934,84 @@ mod tests {
                 panic!("Struct variable was not found in the symbol table.");
             }
         }
+    }
+
+    #[test]
+    fn parse_if_statement_no_else() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("if(1) { x = 5; };"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        let if_stmt = parser.parse_if_statement()?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::IF,
+            ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+            ASTnode::new_unary(
+                ASTop::IFBODY,
+                ASTnode::new_boxed(
+                    ASTop::ASSIGN,
+                    ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+                    DataType::INT,
+                ),
+                DataType::NONE,
+            ),
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&if_stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_if_statement_with_else() -> Result<(), Box<dyn Error>> {
+        let mut scanner =
+            Scanner::new_from_string(String::from("if(1) { x = 5; } else { x = 10; };"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        let if_stmt = parser.parse_if_statement()?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::IF,
+            ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+            ASTnode::new_boxed(
+                ASTop::IFBODY,
+                ASTnode::new_boxed(
+                    ASTop::ASSIGN,
+                    ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+                    DataType::INT,
+                ),
+                ASTnode::new_boxed(
+                    ASTop::ASSIGN,
+                    ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::INT),
+                    DataType::INT,
+                ),
+                DataType::NONE,
+            ),
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&if_stmt), expected);
+
+        Ok(())
     }
 }
