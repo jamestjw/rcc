@@ -371,6 +371,8 @@ fn infix_binding_power(op: TokenType) -> Option<(u8, u8)> {
         TokenType::ASSIGN => (10, 5),
         TokenType::PLUS | TokenType::MINUS => (20, 30),
         TokenType::STAR | TokenType::SLASH => (40, 50),
+        TokenType::EQ | TokenType::NOTEQ => (60, 70),
+        TokenType::GT | TokenType::GTEQ | TokenType::LT | TokenType::LTEQ => (70, 80),
         _ => return None,
     };
     Some(res)
@@ -405,6 +407,12 @@ fn token_type_to_binary_op(token_type: TokenType) -> ASTop {
         TokenType::SLASH => ASTop::DIVIDE,
         TokenType::STAR => ASTop::MULTIPLY,
         TokenType::ASSIGN => ASTop::ASSIGN,
+        TokenType::GT => ASTop::GT,
+        TokenType::GTEQ => ASTop::GTEQ,
+        TokenType::LT => ASTop::LT,
+        TokenType::LTEQ => ASTop::LTEQ,
+        TokenType::EQ => ASTop::EQ,
+        TokenType::NOTEQ => ASTop::NOTEQ,
         _ => {
             panic!("Unknown binary op from token type: {}", token_type);
         }

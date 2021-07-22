@@ -37,6 +37,12 @@ enum_str! {
         ARROW,
         IF,
         ELSE,
+        EQ,
+        NOTEQ,
+        GTEQ,
+        GT,
+        LTEQ,
+        LT,
     }
 }
 
@@ -71,6 +77,12 @@ impl fmt::Display for TokenType {
             TokenType::ARROW => write!(f, "->"),
             TokenType::IF => write!(f, "if"),
             TokenType::ELSE => write!(f, "else"),
+            TokenType::GT => write!(f, ">"),
+            TokenType::GTEQ => write!(f, ">="),
+            TokenType::LT => write!(f, "<"),
+            TokenType::LTEQ => write!(f, "<="),
+            TokenType::EQ => write!(f, "=="),
+            TokenType::NOTEQ => write!(f, "!="),
         }
     }
 }

@@ -33,6 +33,12 @@ enum_str! {
         IF,
         IFBODY,
         UNARYMINUS,
+        EQ,
+        NOTEQ,
+        GTEQ,
+        GT,
+        LTEQ,
+        LT,
     }
 }
 

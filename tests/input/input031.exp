@@ -1,0 +1,24 @@
+5 is
+Not more than 5
+More than or equal to 5
+Less than or equal to 5
+Equals to 5
+---
+10 is
+More than 5
+More than or equal to 10
+Not equal to 5
+---
+0 is
+Not more than 5
+Not more than or equal to 5
+Less than 5
+Less than or equal to 5
+Not equal to 5
+---
+-5 is
+Not more than 5
+Not more than or equal to 5
+Less than 5
+Less than or equal to 5
+Not equal to 5

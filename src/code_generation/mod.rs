@@ -39,6 +39,15 @@ impl Register {
     }
 }
 
+pub enum ComparisonType {
+    EQ,
+    NOTEQ,
+    GT,
+    GTEQ,
+    LTEQ,
+    LT,
+}
+
 // So that we can support multiple types of generators
 // depending on the architecture
 pub trait Generator {
@@ -73,6 +82,8 @@ pub trait Generator {
     fn gen_label(&mut self, s: &str);
     fn jump_if_zero(&mut self, r: usize, label: &str);
     fn jump_to_label(&mut self, label: &str);
+    fn comparison(&mut self, r1: usize, r2: usize, comp_type: ComparisonType) -> usize;
+    fn pre_funccall(&mut self);
 }
 
 // Generates the code for the ASTnode,
@@ -207,6 +218,18 @@ pub fn generate_code_for_node(
             let tmp_reg = generator.load_integer(-1);
             Some(generator.multiply(left_reg.unwrap(), tmp_reg))
         }
+        ASTop::GT | ASTop::GTEQ | ASTop::LT | ASTop::LTEQ | ASTop::EQ | ASTop::NOTEQ => {
+            let comp_type = match node.op {
+                ASTop::EQ => ComparisonType::EQ,
+                ASTop::NOTEQ => ComparisonType::NOTEQ,
+                ASTop::GT => ComparisonType::GT,
+                ASTop::GTEQ => ComparisonType::GTEQ,
+                ASTop::LT => ComparisonType::LT,
+                ASTop::LTEQ => ComparisonType::LTEQ,
+                _ => unreachable!("No other operations are expected here."),
+            };
+            Some(generator.comparison(left_reg.unwrap(), right_reg.unwrap(), comp_type))
+        }
         ASTop::NOOP | ASTop::GLUE => None,
         _ => {
             panic!(
@@ -235,6 +258,8 @@ pub fn generate_label_for_function(sym: &SymbolTableEntry) -> String {
 
 // fn_node should be an ASTnode with ASTop::FUNCCALL
 fn generate_code_for_funccall(generator: &mut impl Generator, fn_node: &Box<ASTnode>) -> usize {
+    generator.pre_funccall();
+
     // This is safe as the left node should always be present along with its symbol
     // if the operation is ASTop::FUNCCALL.
     let fn_sym = fn_node

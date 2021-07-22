@@ -47,7 +47,43 @@ impl Scanner {
         let mut string_table_id = None;
         let token_type = match self.next_char() {
             Some(c) => match c {
-                '=' => TokenType::ASSIGN,
+                '=' => match self.next_char() {
+                    Some(c) => match c {
+                        '=' => TokenType::EQ,
+                        _ => {
+                            self.putback_char(c);
+                            TokenType::ASSIGN
+                        }
+                    },
+                    None => TokenType::EOF,
+                },
+                '!' => match self.next_char() {
+                    Some(c) => match c {
+                        '=' => TokenType::NOTEQ,
+                        _ => return Err(format!("Unknown operator found: !{}", c).into()),
+                    },
+                    None => TokenType::EOF,
+                },
+                '>' => match self.next_char() {
+                    Some(c) => match c {
+                        '=' => TokenType::GTEQ,
+                        _ => {
+                            self.putback_char(c);
+                            TokenType::GT
+                        }
+                    },
+                    None => TokenType::EOF,
+                },
+                '<' => match self.next_char() {
+                    Some(c) => match c {
+                        '=' => TokenType::LTEQ,
+                        _ => {
+                            self.putback_char(c);
+                            TokenType::LT
+                        }
+                    },
+                    None => TokenType::EOF,
+                },
                 '+' => TokenType::PLUS,
                 '-' => match self.next_char() {
                     Some(c) => match c {

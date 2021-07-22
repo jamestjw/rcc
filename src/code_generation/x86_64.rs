@@ -360,12 +360,25 @@ impl Generator for Generator_x86_64 {
                 self.gen_unary_op("popq", Operand::Reg(self.reg_name(r)));
             }
         }
+
+        // TODO: Unpop registers we spilled earlier
+        for r in PARAM_REGS.iter().rev() {
+            self.gen_unary_op("popq", Operand::Reg(r.to_string()));
+        }
+
         self.gen_binary_op(
             "movq",
             Operand::Reg("rax".into()),
             Operand::Reg(self.reg_name(r)),
         );
         return r;
+    }
+
+    fn pre_funccall(&mut self) {
+        // TODO: Improve this, we should also store registers that are in use
+        for r in PARAM_REGS.iter() {
+            self.gen_unary_op("pushq", Operand::Reg(r.to_string()));
+        }
     }
 
     fn preprocess_symbols(&mut self, symtable: &SymbolTable) {
@@ -547,6 +560,39 @@ impl Generator for Generator_x86_64 {
 
     fn jump_to_label(&mut self, label: &str) {
         self.gen_unary_op("jmp", Operand::RawString(label.to_string()));
+    }
+
+    fn comparison(&mut self, r1: usize, r2: usize, comp_type: ComparisonType) -> usize {
+        let tmp_reg = self.alloc_register();
+        self.gen_binary_op(
+            "movq",
+            Operand::Reg(self.reg_name(r1)),
+            Operand::Reg(self.reg_name(tmp_reg)),
+        );
+        self.gen_binary_op(
+            "cmpq",
+            Operand::Reg(self.reg_name(r2)),
+            Operand::Reg(self.reg_name(tmp_reg)),
+        );
+
+        let comp_op = match comp_type {
+            ComparisonType::GT => "setg",
+            ComparisonType::GTEQ => "setge",
+            ComparisonType::LT => "setl",
+            ComparisonType::LTEQ => "setle",
+            ComparisonType::EQ => "sete",
+            ComparisonType::NOTEQ => "setne",
+        };
+
+        self.gen_unary_op(comp_op, Operand::Reg("al".to_string()));
+        self.gen_binary_op(
+            "movzbl",
+            Operand::Reg("al".to_string()),
+            Operand::Reg(self.reg_name(r1)),
+        );
+        self.free_register(tmp_reg);
+        self.free_register(r2);
+        r1
     }
 }
 
