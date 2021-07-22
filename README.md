@@ -23,6 +23,7 @@ I will try to document the progress of this project as best as I can. I will mos
 18/7/2021 - Implement structs.
 
 22/7/2021 - Implement if-else statements.
+22/7/2021 - Implement while statements.
 
 ## Caveats
 - Return statements are required in main functions.

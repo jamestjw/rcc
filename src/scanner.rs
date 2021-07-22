@@ -296,8 +296,15 @@ impl Scanner {
     // Distinguish between identifiers and specific token types
     // based on a lexeme
     fn token_type_from_lexeme(&self, lexeme: &str) -> TokenType {
-        if lexeme.starts_with('c') && lexeme == "char" {
-            return TokenType::CHAR;
+        if lexeme.starts_with('b') && lexeme == "break" {
+            return TokenType::BREAK;
+        }
+        if lexeme.starts_with('c') {
+            if lexeme == "char" {
+                return TokenType::CHAR;
+            } else if lexeme == "continue" {
+                return TokenType::CONTINUE;
+            }
         }
         if lexeme.starts_with('e') && lexeme == "else" {
             return TokenType::ELSE;
@@ -317,6 +324,9 @@ impl Scanner {
         }
         if lexeme.starts_with('v') && lexeme == "void" {
             return TokenType::VOID;
+        }
+        if lexeme.starts_with('w') && lexeme == "while" {
+            return TokenType::WHILE;
         }
 
         return TokenType::IDENT;

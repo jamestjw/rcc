@@ -43,6 +43,8 @@ pub struct Generator_x86_64 {
     output_str: String,
     registers: Vec<Register>,
     label_idx: u32,
+    break_stack: Vec<String>,
+    continue_stack: Vec<String>,
 }
 
 impl Generator_x86_64 {
@@ -75,6 +77,8 @@ impl Generator_x86_64 {
                 ),
             ],
             label_idx: 0,
+            break_stack: Vec::new(),
+            continue_stack: Vec::new(),
         }
     }
 
@@ -593,6 +597,46 @@ impl Generator for Generator_x86_64 {
         self.free_register(tmp_reg);
         self.free_register(r2);
         r1
+    }
+
+    fn gen_break(&mut self) {
+        let break_label = match self.break_stack.last() {
+            Some(label) => label.clone(),
+            // The parser should ensure that this never happens
+            None => panic!("Tried to generate break when break stack is empty"),
+        };
+        self.jump_to_label(&break_label);
+    }
+
+    fn gen_continue(&mut self) {
+        let continue_label = match self.continue_stack.last() {
+            Some(label) => label.clone(),
+            // The parser should ensure that this never happens
+            None => panic!("Tried to generate continue_stack when continue_stack stack is empty"),
+        };
+        self.jump_to_label(&continue_label);
+    }
+
+    fn push_break_label(&mut self, label: String) {
+        self.break_stack.push(label);
+    }
+
+    fn pop_break_label(&mut self) {
+        if self.break_stack.pop().is_none() {
+            // The parser should ensure that this never happens
+            panic!("Tried to pop from empty break stack.");
+        }
+    }
+
+    fn push_continue_label(&mut self, label: String) {
+        self.continue_stack.push(label);
+    }
+
+    fn pop_continue_label(&mut self) {
+        if self.continue_stack.pop().is_none() {
+            // The parser should ensure that this never happens
+            panic!("Tried to pop from empty continue stack.");
+        }
     }
 }
 

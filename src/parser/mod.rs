@@ -25,6 +25,7 @@ pub struct Parser<'a> {
     pub global_symbol_table: SymbolTable,
     pub composite_symbol_table: SymbolTable,
     pub current_func_sym: Option<Rc<RefCell<SymbolTableEntry>>>, // Current function that we are parsing
+    loop_count: u8, // How many loops is the parser currently parsing
 }
 
 impl<'a> Parser<'a> {
@@ -36,6 +37,7 @@ impl<'a> Parser<'a> {
             global_symbol_table: SymbolTable::new(),
             composite_symbol_table: SymbolTable::new(),
             current_func_sym: None,
+            loop_count: 0,
         })
     }
 

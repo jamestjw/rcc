@@ -1,0 +1,2 @@
+Error on line 2 in tests/input/input036-err.c:
+Continue statements are only valid in loops.

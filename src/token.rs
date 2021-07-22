@@ -36,7 +36,11 @@ enum_str! {
         DOT,
         ARROW,
         IF,
+
         ELSE,
+        WHILE,
+        BREAK,
+        CONTINUE,
         EQ,
         NOTEQ,
         GTEQ,
@@ -77,6 +81,10 @@ impl fmt::Display for TokenType {
             TokenType::ARROW => write!(f, "->"),
             TokenType::IF => write!(f, "if"),
             TokenType::ELSE => write!(f, "else"),
+            TokenType::WHILE => write!(f, "while"),
+            TokenType::BREAK => write!(f, "break"),
+            TokenType::CONTINUE => write!(f, "continue"),
+
             TokenType::GT => write!(f, ">"),
             TokenType::GTEQ => write!(f, ">="),
             TokenType::LT => write!(f, "<"),

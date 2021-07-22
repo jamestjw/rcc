@@ -44,6 +44,9 @@ impl<'a> Parser<'a> {
             Some(tok) => match tok.token_type {
                 TokenType::RETURN => self.parse_return()?,
                 TokenType::IF => self.parse_if_statement()?,
+                TokenType::WHILE => self.parse_while_statement()?,
+                TokenType::BREAK => self.parse_break_statement()?,
+                TokenType::CONTINUE => self.parse_continue_statement()?,
                 _ => {
                     let node = self.expr_by_precedence(0)?;
                     self.match_token(TokenType::SEMI)?;
@@ -524,6 +527,48 @@ impl<'a> Parser<'a> {
             DataType::NONE,
         ))
     }
+
+    pub fn parse_while_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        self.loop_count += 1;
+        self.match_token(TokenType::WHILE)?;
+        self.match_token(TokenType::LPAREN)?;
+        let cond_expr = self.expr_by_precedence(0)?;
+        self.match_token(TokenType::RPAREN)?;
+        self.match_token(TokenType::LBRACE)?;
+        let while_body = self.parse_statements(TokenType::RBRACE, false)?;
+        self.match_token(TokenType::RBRACE)?;
+
+        self.loop_count -= 1;
+
+        Ok(ASTnode::new_boxed(
+            ASTop::WHILE,
+            cond_expr,
+            while_body,
+            DataType::NONE,
+        ))
+    }
+
+    pub fn parse_break_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        if self.loop_count <= 0 {
+            return Err("Break statements are only valid in loops.".into());
+        }
+
+        self.match_token(TokenType::BREAK)?;
+        self.match_token(TokenType::SEMI)?;
+
+        Ok(ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE))
+    }
+
+    pub fn parse_continue_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        if self.loop_count <= 0 {
+            return Err("Continue statements are only valid in loops.".into());
+        }
+
+        self.match_token(TokenType::CONTINUE)?;
+        self.match_token(TokenType::SEMI)?;
+
+        Ok(ASTnode::new_leaf(ASTop::CONTINUE, 0, DataType::NONE))
+    }
 }
 
 #[cfg(test)]
@@ -949,7 +994,7 @@ mod tests {
             0,
             SymClass::GLOBAL,
         );
-        let if_stmt = parser.parse_if_statement()?;
+        let stmt = parser.parse_if_statement()?;
 
         let expected = ASTnode::new_boxed(
             ASTop::IF,
@@ -967,7 +1012,7 @@ mod tests {
             DataType::NONE,
         );
 
-        match_ast_node(Some(&if_stmt), expected);
+        match_ast_node(Some(&stmt), expected);
 
         Ok(())
     }
@@ -1011,6 +1056,123 @@ mod tests {
         );
 
         match_ast_node(Some(&if_stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_while_statement() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("while(x > 5) { x = x - 1; };"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        let stmt = parser.parse_while_statement()?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::WHILE,
+            ASTnode::new_boxed(
+                ASTop::GT,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+                DataType::INT,
+            ),
+            ASTnode::new_boxed(
+                ASTop::ASSIGN,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                ASTnode::new_boxed(
+                    ASTop::MINUS,
+                    ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+                    DataType::INT,
+                ),
+                DataType::INT,
+            ),
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_valid_break_statement_in_while_loop() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("while(1) { break; };"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_while_statement()?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::WHILE,
+            ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+            ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE),
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_valid_continue_statement_in_while_loop() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("while(1) { continue; };"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_while_statement()?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::WHILE,
+            ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+            ASTnode::new_leaf(ASTop::CONTINUE, 0, DataType::NONE),
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_invalid_break_statement_outside_of_loop() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("continue;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_break_statement();
+
+        match stmt {
+            Ok(_) => {
+                panic!("Should have failed to parse break statement outside of loop.");
+            }
+            Err(e) => assert_eq!("Break statements are only valid in loops.", e.to_string()),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_invalid_continue_statement_outside_of_loop() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("continue;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_continue_statement();
+
+        match stmt {
+            Ok(_) => {
+                panic!("Should have failed to parse continue statement outside of loop.");
+            }
+            Err(e) => assert_eq!(
+                "Continue statements are only valid in loops.",
+                e.to_string()
+            ),
+        }
 
         Ok(())
     }

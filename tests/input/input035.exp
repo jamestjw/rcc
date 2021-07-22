@@ -1,0 +1,2 @@
+Error on line 2 in tests/input/input035-err.c:
+Break statements are only valid in loops.

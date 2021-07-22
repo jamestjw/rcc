@@ -32,6 +32,9 @@ enum_str! {
         PTRMEMBER, // Access member of struct via a pointer
         IF,
         IFBODY,
+        WHILE,
+        CONTINUE,
+        BREAK,
         UNARYMINUS,
         EQ,
         NOTEQ,

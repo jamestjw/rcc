@@ -84,6 +84,12 @@ pub trait Generator {
     fn jump_to_label(&mut self, label: &str);
     fn comparison(&mut self, r1: usize, r2: usize, comp_type: ComparisonType) -> usize;
     fn pre_funccall(&mut self);
+    fn gen_break(&mut self);
+    fn gen_continue(&mut self);
+    fn push_break_label(&mut self, label: String);
+    fn pop_break_label(&mut self);
+    fn push_continue_label(&mut self, label: String);
+    fn pop_continue_label(&mut self);
 }
 
 // Generates the code for the ASTnode,
@@ -114,6 +120,10 @@ pub fn generate_code_for_node(
         }
         ASTop::IF => {
             generate_code_if_statement(generator, node);
+            return None;
+        }
+        ASTop::WHILE => {
+            generate_code_while_statement(generator, node);
             return None;
         }
         _ => {}
@@ -229,6 +239,14 @@ pub fn generate_code_for_node(
                 _ => unreachable!("No other operations are expected here."),
             };
             Some(generator.comparison(left_reg.unwrap(), right_reg.unwrap(), comp_type))
+        }
+        ASTop::CONTINUE => {
+            generator.gen_continue();
+            None
+        }
+        ASTop::BREAK => {
+            generator.gen_break();
+            None
         }
         ASTop::NOOP | ASTop::GLUE => None,
         _ => {
@@ -442,4 +460,36 @@ fn generate_code_if_statement(generator: &mut impl Generator, node: &Box<ASTnode
             panic!("If statement body is absent in IF statement ASTnode");
         }
     }
+}
+
+fn generate_code_while_statement(generator: &mut impl Generator, node: &Box<ASTnode>) {
+    let start_label = generator.new_label();
+    let end_label = generator.new_label();
+
+    generator.push_continue_label(start_label.clone());
+    generator.push_break_label(end_label.clone());
+
+    generator.gen_label(&start_label);
+    let cond_reg = match &node.as_ref().left {
+        Some(left) => generate_code_for_node(generator, left)
+            .expect("Evaluated conditional expression should have its value stored in a register."),
+        None => {
+            panic!("Conditional expression node is absent in IF statement ASTnode");
+        }
+    };
+    generator.jump_if_zero(cond_reg, &end_label);
+
+    match &node.as_ref().right {
+        Some(body) => {
+            generate_code_for_node(generator, body);
+            generator.jump_to_label(&start_label);
+            generator.gen_label(&end_label);
+        }
+        None => {
+            panic!("While statement body is absent in IF statement ASTnode");
+        }
+    }
+
+    generator.pop_break_label();
+    generator.pop_continue_label();
 }
