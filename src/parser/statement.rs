@@ -45,6 +45,7 @@ impl<'a> Parser<'a> {
                 TokenType::RETURN => self.parse_return()?,
                 TokenType::IF => self.parse_if_statement()?,
                 TokenType::WHILE => self.parse_while_statement()?,
+                TokenType::FOR => self.parse_for_statement()?,
                 TokenType::BREAK => self.parse_break_statement()?,
                 TokenType::CONTINUE => self.parse_continue_statement()?,
                 _ => {
@@ -510,7 +511,7 @@ impl<'a> Parser<'a> {
         let if_body = self.parse_statements(TokenType::RBRACE, false)?;
         self.match_token(TokenType::RBRACE)?;
 
-        let mut body_node = ASTnode::new_unary(ASTop::IFBODY, if_body, DataType::NONE);
+        let mut body_node = ASTnode::new_unary(ASTop::GLUE, if_body, DataType::NONE);
 
         if self.current_token_type()? == TokenType::ELSE {
             self.match_token(TokenType::ELSE)?;
@@ -568,6 +569,45 @@ impl<'a> Parser<'a> {
         self.match_token(TokenType::SEMI)?;
 
         Ok(ASTnode::new_leaf(ASTop::CONTINUE, 0, DataType::NONE))
+    }
+
+    pub fn parse_for_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        // We cheat a little bit and we parse this into a WHILE statement
+        // because all for loops can be treated as while loops
+        self.loop_count += 1;
+
+        self.match_token(TokenType::FOR)?;
+        self.match_token(TokenType::LPAREN)?;
+        let init_expr = self.parse_local_expression(TokenType::SEMI, TokenType::COMMA)?;
+        self.match_token(TokenType::SEMI)?;
+        let mut cond_expr = self.parse_local_expression(TokenType::SEMI, TokenType::COMMA)?;
+        cond_expr = match cond_expr.op {
+            ASTop::NOOP => ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+            _ => cond_expr,
+        };
+        self.match_token(TokenType::SEMI)?;
+        let post_expr = self.parse_local_expression(TokenType::RPAREN, TokenType::COMMA)?;
+        self.match_token(TokenType::RPAREN)?;
+
+        self.match_token(TokenType::LBRACE)?;
+        let body = self.parse_statements(TokenType::RBRACE, false)?;
+        self.match_token(TokenType::RBRACE)?;
+
+        self.loop_count -= 1;
+
+        let node = ASTnode::new_boxed(
+            ASTop::GLUE,
+            init_expr,
+            ASTnode::new_boxed(
+                ASTop::FOR,
+                cond_expr,
+                ASTnode::new_boxed(ASTop::GLUE, body, post_expr, DataType::NONE),
+                DataType::NONE,
+            ),
+            DataType::NONE,
+        );
+
+        Ok(node)
     }
 }
 
@@ -1000,7 +1040,7 @@ mod tests {
             ASTop::IF,
             ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
             ASTnode::new_unary(
-                ASTop::IFBODY,
+                ASTop::GLUE,
                 ASTnode::new_boxed(
                     ASTop::ASSIGN,
                     ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
@@ -1037,7 +1077,7 @@ mod tests {
             ASTop::IF,
             ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
             ASTnode::new_boxed(
-                ASTop::IFBODY,
+                ASTop::GLUE,
                 ASTnode::new_boxed(
                     ASTop::ASSIGN,
                     ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
@@ -1173,6 +1213,78 @@ mod tests {
                 e.to_string()
             ),
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_for_statement_with_all_exprs() -> Result<(), Box<dyn Error>> {
+        let mut scanner =
+            Scanner::new_from_string(String::from("for(x = 0; x < 5; x = x + 1) { y = x; }"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let _sym_y = parser.global_symbol_table.add_symbol(
+            "y".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let stmt = parser.parse_for_statement()?;
+
+        let init_expr = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 0, DataType::INT),
+            DataType::INT,
+        );
+        let cond_expr = ASTnode::new_boxed(
+            ASTop::LT,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            DataType::INT,
+        );
+        let post_expr = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_boxed(
+                ASTop::ADD,
+                ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+                DataType::INT,
+            ),
+            DataType::INT,
+        );
+        let body = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            DataType::INT,
+        );
+        let expected = ASTnode::new_boxed(
+            ASTop::GLUE,
+            init_expr,
+            ASTnode::new_boxed(
+                ASTop::FOR,
+                cond_expr,
+                ASTnode::new_boxed(ASTop::GLUE, body, post_expr, DataType::NONE),
+                DataType::NONE,
+            ),
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
 
         Ok(())
     }

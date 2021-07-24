@@ -363,6 +363,38 @@ impl<'a> Parser<'a> {
 
         Ok(funccall_node)
     }
+
+    pub fn parse_local_expression(
+        &mut self,
+        terminator: TokenType,
+        separator: TokenType,
+    ) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        let mut tree: Option<Box<ASTnode>> = None;
+
+        while self.current_token_type()? != terminator {
+            let node = self.expr_by_precedence(0)?;
+
+            match tree {
+                Some(original_tree) => {
+                    tree = Some(ASTnode::new_boxed(
+                        ASTop::GLUE,
+                        original_tree,
+                        node,
+                        DataType::NONE,
+                    ));
+                }
+                None => {
+                    tree = Some(node);
+                }
+            }
+
+            if self.current_token_type()? != terminator {
+                self.match_token(separator)?;
+            }
+        }
+
+        Ok(tree.unwrap_or_else(|| ASTnode::new_noop()))
+    }
 }
 
 // How tightly this operator binds operands to its left and right
@@ -1222,6 +1254,87 @@ mod tests {
                 panic!("Left ASTnode does not contain reference to symtable entry.");
             }
         };
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_local_expression_empty() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(";"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let expr = parser.parse_local_expression(TokenType::SEMI, TokenType::COMMA)?;
+
+        assert_eq!(expr.op, ASTop::NOOP);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_local_expression_assignment() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("x = 5;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let expr = parser.parse_local_expression(TokenType::SEMI, TokenType::COMMA)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            DataType::INT,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_local_expression_double_assignment() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("x = 5, y = 10;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let _sym_y = parser.global_symbol_table.add_symbol(
+            "y".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let expr = parser.parse_local_expression(TokenType::SEMI, TokenType::COMMA)?;
+
+        let assign_x = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            DataType::INT,
+        );
+        let assign_y = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+            ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::INT),
+            DataType::INT,
+        );
+        let expected = ASTnode::new_boxed(ASTop::GLUE, assign_x, assign_y, DataType::NONE);
+
+        match_ast_node(Some(&expr), expected);
 
         Ok(())
     }

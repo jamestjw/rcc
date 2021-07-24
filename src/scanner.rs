@@ -309,6 +309,9 @@ impl Scanner {
         if lexeme.starts_with('e') && lexeme == "else" {
             return TokenType::ELSE;
         }
+        if lexeme.starts_with('f') && lexeme == "for" {
+            return TokenType::FOR;
+        }
         if lexeme.starts_with('i') {
             if lexeme == "int" {
                 return TokenType::INT;

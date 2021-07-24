@@ -126,6 +126,10 @@ pub fn generate_code_for_node(
             generate_code_while_statement(generator, node);
             return None;
         }
+        ASTop::FOR => {
+            generate_code_for_statement(generator, node);
+            return None;
+        }
         _ => {}
     }
 
@@ -248,7 +252,8 @@ pub fn generate_code_for_node(
             generator.gen_break();
             None
         }
-        ASTop::NOOP | ASTop::GLUE => None,
+        ASTop::NOOP => None,
+        ASTop::GLUE => right_reg,
         _ => {
             panic!(
                 "Unknown ASTop:{} encountered during code generation",
@@ -444,10 +449,10 @@ fn generate_code_if_statement(generator: &mut impl Generator, node: &Box<ASTnode
 
     match &node.as_ref().right {
         Some(body) => {
-            if body.op != ASTop::IFBODY {
-                panic!("Expected IFBODY on the right hand of IF ASTnode.")
+            if body.op != ASTop::GLUE {
+                panic!("Expected glue node containing the true clause and the optional false clause of an IF statement.")
             }
-            generate_code_for_node(generator, body.left.as_ref().expect("Left node of IFBODY should contain the node with the true clause of an if statement."));
+            generate_code_for_node(generator, body.left.as_ref().expect("Left node of GLUE should contain the node with the true clause of an if statement."));
             generator.jump_to_label(&end_label);
             generator.gen_label(&false_label);
 
@@ -487,6 +492,51 @@ fn generate_code_while_statement(generator: &mut impl Generator, node: &Box<ASTn
         }
         None => {
             panic!("While statement body is absent in IF statement ASTnode");
+        }
+    }
+
+    generator.pop_break_label();
+    generator.pop_continue_label();
+}
+
+fn generate_code_for_statement(generator: &mut impl Generator, node: &Box<ASTnode>) {
+    let start_label = generator.new_label();
+    let end_label = generator.new_label();
+    let continue_label = generator.new_label();
+
+    generator.push_continue_label(continue_label.clone());
+    generator.push_break_label(end_label.clone());
+
+    generator.gen_label(&start_label);
+    // Left node contains the conditional
+    let cond_reg = match &node.as_ref().left {
+        Some(left) => generate_code_for_node(generator, left)
+            .expect("Evaluated conditional expression should have its value stored in a register."),
+        None => {
+            panic!("Conditional expression node is absent in IF statement ASTnode");
+        }
+    };
+    generator.jump_if_zero(cond_reg, &end_label);
+
+    match &node.as_ref().right {
+        // This should be a GLUE node with the actual loop body on the left
+        // and the post expr on the right
+        Some(body) => {
+            match &body.left {
+                Some(loop_body) => generate_code_for_node(generator, loop_body),
+                None => panic!("Actual loop body is missing in GLUE node within IF ASTnode"),
+            };
+            // Post expr should be executed after continue statement
+            generator.gen_label(&continue_label);
+            match &body.right {
+                Some(post_expr) => generate_code_for_node(generator, post_expr),
+                None => panic!("Post expression is missing in GLUE node within IF ASTnode"),
+            };
+            generator.jump_to_label(&start_label);
+            generator.gen_label(&end_label);
+        }
+        None => {
+            panic!("Body is absent in IF statement ASTnode");
         }
     }
 
