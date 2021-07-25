@@ -107,6 +107,7 @@ impl Scanner {
                 '[' => TokenType::LBRACKET,
                 ']' => TokenType::RBRACKET,
                 '.' => TokenType::DOT,
+                ':' => TokenType::COLON,
                 '0'..='9' => {
                     int_value = self.scan_int(c) as i32;
                     TokenType::INTLIT
@@ -300,11 +301,16 @@ impl Scanner {
             return TokenType::BREAK;
         }
         if lexeme.starts_with('c') {
-            if lexeme == "char" {
+            if lexeme == "case" {
+                return TokenType::CASE;
+            } else if lexeme == "char" {
                 return TokenType::CHAR;
             } else if lexeme == "continue" {
                 return TokenType::CONTINUE;
             }
+        }
+        if lexeme.starts_with('d') && lexeme == "default" {
+            return TokenType::DEFAULT;
         }
         if lexeme.starts_with('e') && lexeme == "else" {
             return TokenType::ELSE;
@@ -322,8 +328,12 @@ impl Scanner {
         if lexeme.starts_with('r') && lexeme == "return" {
             return TokenType::RETURN;
         }
-        if lexeme.starts_with('s') && lexeme == "struct" {
-            return TokenType::STRUCT;
+        if lexeme.starts_with('s') {
+            if lexeme == "struct" {
+                return TokenType::STRUCT;
+            } else if lexeme == "switch" {
+                return TokenType::SWITCH;
+            }
         }
         if lexeme.starts_with('v') && lexeme == "void" {
             return TokenType::VOID;

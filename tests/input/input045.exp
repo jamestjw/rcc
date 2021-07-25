@@ -1,0 +1,2 @@
+Error on line 9 in tests/input/input045-err.c:
+Duplicate case value '2' in switch statement.

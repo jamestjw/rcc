@@ -1,0 +1,2 @@
+Error on line 10 in tests/input/input044-err.c:
+No more cases can be defined after the default clause.

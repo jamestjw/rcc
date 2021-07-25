@@ -90,6 +90,7 @@ pub trait Generator {
     fn pop_break_label(&mut self);
     fn push_continue_label(&mut self, label: String);
     fn pop_continue_label(&mut self);
+    fn jump_if_equal_to(&mut self, r: usize, v: i32, label: &str);
 }
 
 // Generates the code for the ASTnode,
@@ -128,6 +129,10 @@ pub fn generate_code_for_node(
         }
         ASTop::FOR => {
             generate_code_for_statement(generator, node);
+            return None;
+        }
+        ASTop::SWITCH => {
+            generate_code_switch_statement(generator, node);
             return None;
         }
         _ => {}
@@ -542,4 +547,72 @@ fn generate_code_for_statement(generator: &mut impl Generator, node: &Box<ASTnod
 
     generator.pop_break_label();
     generator.pop_continue_label();
+}
+
+// Lays out the code for each clause followed by the code to jump to the
+// right branch based on the value of expression.
+fn generate_code_switch_statement(generator: &mut impl Generator, node: &Box<ASTnode>) {
+    // Label marking the entry point of the switch
+    let start_label = generator.new_label();
+    generator.jump_to_label(&start_label);
+
+    let end_label = generator.new_label();
+    generator.push_break_label(end_label.clone());
+
+    let mut cases: Vec<(Option<i32>, String)> = Vec::new();
+
+    let mut next_case = node
+        .right
+        .as_ref()
+        .expect("Switch ASTnode should have at least one clause");
+
+    loop {
+        let case_label = generator.new_label();
+        generator.gen_label(&case_label);
+        let case_value = match next_case.op {
+            ASTop::CASE => Some(next_case.int_value),
+            ASTop::DEFAULT => None,
+            _ => {
+                panic!("Invalid ASTop {} in SWITCH ASTnode", next_case.op.name());
+            }
+        };
+        cases.push((case_value, case_label));
+
+        if let Some(n) = next_case.left.as_ref() {
+            if let Some(r) = generate_code_for_node(generator, n) {
+                generator.free_register(r);
+            }
+        };
+
+        next_case = match next_case.right.as_ref() {
+            Some(n) => n,
+            None => {
+                break;
+            }
+        }
+    }
+    generator.jump_to_label(&end_label);
+    generator.gen_label(&start_label);
+
+    let r = generate_code_for_node(
+        generator,
+        node.left
+            .as_ref()
+            .expect("Left node of SWITCH ASTnode should contain the expression to test."),
+    )
+    .expect("Expression in SWITCH ASTnode should yield a value.");
+
+    for (val, label) in cases.iter() {
+        match val {
+            Some(val) => generator.jump_if_equal_to(r, *val, label),
+            None => {
+                generator.jump_to_label(label);
+            }
+        }
+    }
+    generator.free_register(r);
+
+    generator.gen_label(&end_label);
+
+    generator.pop_break_label();
 }

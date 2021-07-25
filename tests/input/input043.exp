@@ -1,0 +1,2 @@
+Error on line 5 in tests/input/input043-err.c:
+Encountered switch statement with 0 cases.

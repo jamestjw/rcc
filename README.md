@@ -28,6 +28,8 @@ I will try to document the progress of this project as best as I can. I will mos
 
 24/7/2021 - Implement for loops.
 
+25/7/2021 - Implement switch statements.
+
 ## Caveats
 - Return statements are required in main functions.
 - Declarations in functions (in the local scope) are not supported yet.

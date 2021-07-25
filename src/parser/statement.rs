@@ -46,8 +46,15 @@ impl<'a> Parser<'a> {
                 TokenType::IF => self.parse_if_statement()?,
                 TokenType::WHILE => self.parse_while_statement()?,
                 TokenType::FOR => self.parse_for_statement()?,
+                TokenType::SWITCH => self.parse_switch_statement()?,
                 TokenType::BREAK => self.parse_break_statement()?,
                 TokenType::CONTINUE => self.parse_continue_statement()?,
+                TokenType::LBRACE => {
+                    self.match_token(TokenType::LBRACE)?;
+                    let stmt = self.parse_compound_statement(false)?;
+                    self.match_token(TokenType::RBRACE)?;
+                    stmt
+                }
                 _ => {
                     let node = self.expr_by_precedence(0)?;
                     self.match_token(TokenType::SEMI)?;
@@ -381,16 +388,26 @@ impl<'a> Parser<'a> {
         Ok(sym)
     }
 
-    fn parse_statements(
+    fn parse_compound_statement(
         &mut self,
-        end_token_type: TokenType,
         return_check: bool,
     ) -> Result<Box<ASTnode>, Box<dyn Error>> {
         let mut tree: Option<Box<ASTnode>> = None;
         // TODO: Is there a better way to track whether or not a return was included?
         let mut last_op = ASTop::NOOP;
 
-        while self.current_token.as_ref().unwrap().token_type != end_token_type {
+        loop {
+            let curr_token_type = self.current_token_type()?;
+            if curr_token_type == TokenType::RBRACE {
+                break;
+            }
+            // Allowing multiline statements in switch cases without braces
+            if self.switch_count > 0
+                && (curr_token_type == TokenType::CASE || curr_token_type == TokenType::DEFAULT)
+            {
+                break;
+            }
+
             let node = self.parse_statement()?;
             last_op = node.op;
 
@@ -434,7 +451,6 @@ impl<'a> Parser<'a> {
             SymClass::GLOBAL,
         );
 
-        // TODO: Support defining parameters
         self.match_token(TokenType::LPAREN)?;
 
         if !self.is_token_type(TokenType::RPAREN)? {
@@ -449,7 +465,7 @@ impl<'a> Parser<'a> {
         // when we parse the body of the function.
         self.current_func_sym = Some(Rc::clone(&sym));
 
-        let tree = self.parse_statements(TokenType::RBRACE, data_type != DataType::VOID)?;
+        let tree = self.parse_compound_statement(data_type != DataType::VOID)?;
 
         // Since we are done parsing the body of the function, we remove the pointer
         // to the symbol of the current function.
@@ -507,17 +523,13 @@ impl<'a> Parser<'a> {
         self.match_token(TokenType::LPAREN)?;
         let cond_expr = self.expr_by_precedence(0)?;
         self.match_token(TokenType::RPAREN)?;
-        self.match_token(TokenType::LBRACE)?;
-        let if_body = self.parse_statements(TokenType::RBRACE, false)?;
-        self.match_token(TokenType::RBRACE)?;
+        let if_body = self.parse_statement()?;
 
         let mut body_node = ASTnode::new_unary(ASTop::GLUE, if_body, DataType::NONE);
 
         if self.current_token_type()? == TokenType::ELSE {
             self.match_token(TokenType::ELSE)?;
-            self.match_token(TokenType::LBRACE)?;
-            let else_body = self.parse_statements(TokenType::RBRACE, false)?;
-            self.match_token(TokenType::RBRACE)?;
+            let else_body = self.parse_statement()?;
             body_node.right = Some(else_body);
         }
 
@@ -535,9 +547,7 @@ impl<'a> Parser<'a> {
         self.match_token(TokenType::LPAREN)?;
         let cond_expr = self.expr_by_precedence(0)?;
         self.match_token(TokenType::RPAREN)?;
-        self.match_token(TokenType::LBRACE)?;
-        let while_body = self.parse_statements(TokenType::RBRACE, false)?;
-        self.match_token(TokenType::RBRACE)?;
+        let while_body = self.parse_statement()?;
 
         self.loop_count -= 1;
 
@@ -550,7 +560,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_break_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        if self.loop_count <= 0 {
+        if self.loop_count + self.switch_count <= 0 {
             return Err("Break statements are only valid in loops.".into());
         }
 
@@ -590,7 +600,7 @@ impl<'a> Parser<'a> {
         self.match_token(TokenType::RPAREN)?;
 
         self.match_token(TokenType::LBRACE)?;
-        let body = self.parse_statements(TokenType::RBRACE, false)?;
+        let body = self.parse_compound_statement(false)?;
         self.match_token(TokenType::RBRACE)?;
 
         self.loop_count -= 1;
@@ -608,6 +618,102 @@ impl<'a> Parser<'a> {
         );
 
         Ok(node)
+    }
+
+    pub fn parse_switch_statement(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
+        self.switch_count += 1;
+
+        self.match_token(TokenType::SWITCH)?;
+        self.match_token(TokenType::LPAREN)?;
+        let expr = self.expr_by_precedence(0)?;
+        self.match_token(TokenType::RPAREN)?;
+        self.match_token(TokenType::LBRACE)?;
+
+        let mut has_default = false;
+
+        let mut case_nodes: Vec<Box<ASTnode>> = Vec::new();
+        let mut case_values: Vec<i32> = Vec::new();
+
+        loop {
+            let curr_tok_type = self.current_token_type()?;
+            match curr_tok_type {
+                TokenType::CASE | TokenType::DEFAULT => {
+                    let mut case_value = 0;
+                    if has_default {
+                        return Err(format!(
+                            "No more cases can be defined after the default clause."
+                        )
+                        .into());
+                    }
+                    let op = match curr_tok_type {
+                        TokenType::DEFAULT => {
+                            has_default = true;
+                            self.consume()?;
+                            self.match_token(TokenType::COLON)?;
+                            ASTop::DEFAULT
+                        }
+                        TokenType::CASE => {
+                            self.consume()?;
+                            let case_expr = self.primary_expr()?;
+                            // TODO: Verify that there are no duplicates
+                            if case_expr.op != ASTop::INTLIT {
+                                return Err(
+                                    "Only integer values are allowed as case values.".into()
+                                );
+                            } else {
+                                case_value = case_expr.int_value;
+
+                                if case_values.contains(&case_value) {
+                                    return Err(format!(
+                                        "Duplicate case value '{}' in switch statement.",
+                                        case_value
+                                    )
+                                    .into());
+                                }
+                                case_values.push(case_value);
+                            }
+                            self.match_token(TokenType::COLON)?;
+                            ASTop::CASE
+                        }
+                        _ => unreachable!("This arm should never be invoked."),
+                    };
+                    // Check if this case has a statement,
+                    // i.e. whether or not it falls through
+                    let case_stmt = match self.current_token_type()? {
+                        TokenType::DEFAULT | TokenType::CASE => None,
+                        _ => Some(self.parse_compound_statement(false)?),
+                    };
+                    let mut case_node = ASTnode::new_leaf(op, case_value, DataType::NONE);
+                    case_node.left = case_stmt;
+                    case_nodes.push(case_node);
+                }
+                TokenType::RBRACE => {
+                    if case_nodes.len() == 0 {
+                        return Err(format!("Encountered switch statement with 0 cases.").into());
+                    }
+                    break;
+                }
+                _ => {
+                    return Err(format!(
+                        "Unexpected {} token in switch statement.",
+                        curr_tok_type.name()
+                    )
+                    .into());
+                }
+            }
+        }
+        self.match_token(TokenType::RBRACE)?;
+
+        let mut switch_node = ASTnode::new_unary(ASTop::SWITCH, expr, DataType::NONE);
+
+        for _ in 0..case_nodes.len() {
+            let mut case_node = case_nodes.pop().unwrap();
+            case_node.right = switch_node.right;
+            switch_node.right = Some(case_node);
+        }
+
+        self.switch_count -= 1;
+        Ok(switch_node)
     }
 }
 
@@ -1285,6 +1391,297 @@ mod tests {
         );
 
         match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_one_clause_simple() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) { 
+                case 5:
+                    break;
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_switch_statement()?;
+
+        let mut case_1 = ASTnode::new_unary(
+            ASTop::CASE,
+            ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE),
+            DataType::NONE,
+        );
+        case_1.int_value = 5;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::SWITCH,
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            case_1,
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_one_clause_with_two_stmts() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) { 
+                case 5:
+                    x = 10;
+                    break;
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let stmt = parser.parse_switch_statement()?;
+
+        let mut case_1 = ASTnode::new_unary(
+            ASTop::CASE,
+            ASTnode::new_boxed(
+                ASTop::GLUE,
+                ASTnode::new_boxed(
+                    ASTop::ASSIGN,
+                    ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::INT),
+                    DataType::INT,
+                ),
+                ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE),
+                DataType::NONE,
+            ),
+            DataType::NONE,
+        );
+        case_1.int_value = 5;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::SWITCH,
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            case_1,
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_one_clause_with_two_stmts_with_braces() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) { 
+                case 5: {
+                    x = 10;
+                    break;
+                }
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let stmt = parser.parse_switch_statement()?;
+
+        let mut case_1 = ASTnode::new_unary(
+            ASTop::CASE,
+            ASTnode::new_boxed(
+                ASTop::GLUE,
+                ASTnode::new_boxed(
+                    ASTop::ASSIGN,
+                    ASTnode::new_leaf(ASTop::IDENT, 0, DataType::INT),
+                    ASTnode::new_leaf(ASTop::INTLIT, 10, DataType::INT),
+                    DataType::INT,
+                ),
+                ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE),
+                DataType::NONE,
+            ),
+            DataType::NONE,
+        );
+        case_1.int_value = 5;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::SWITCH,
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            case_1,
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_two_clauses() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) { 
+                case 5:
+                    break;
+                default:
+                    break;
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_switch_statement()?;
+
+        let case_2 = ASTnode::new_unary(
+            ASTop::DEFAULT,
+            ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE),
+            DataType::NONE,
+        );
+
+        let mut case_1 = ASTnode::new_unary(
+            ASTop::CASE,
+            ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE),
+            DataType::NONE,
+        );
+        case_1.int_value = 5;
+        case_1.right = Some(case_2);
+
+        let expected = ASTnode::new_boxed(
+            ASTop::SWITCH,
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            case_1,
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_two_clauses_with_fallthrough() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) { 
+                case 5:
+                default:
+                    break;
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_switch_statement()?;
+
+        let case_2 = ASTnode::new_unary(
+            ASTop::DEFAULT,
+            ASTnode::new_leaf(ASTop::BREAK, 0, DataType::NONE),
+            DataType::NONE,
+        );
+
+        let mut case_1 = ASTnode::new_leaf(ASTop::CASE, 5, DataType::NONE);
+        case_1.right = Some(case_2);
+
+        let expected = ASTnode::new_boxed(
+            ASTop::SWITCH,
+            ASTnode::new_leaf(ASTop::INTLIT, 5, DataType::INT),
+            case_1,
+            DataType::NONE,
+        );
+
+        match_ast_node(Some(&stmt), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_with_no_cases() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) { 
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_switch_statement();
+
+        match stmt {
+            Ok(_) => panic!("Expected failure to parse switch statement with no cases"),
+            Err(e) => assert_eq!(e.to_string(), "Encountered switch statement with 0 cases."),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_duplicate_cases() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) {
+                case 2:
+                case 2:
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_switch_statement();
+
+        match stmt {
+            Ok(_) => panic!("Expected failure to parse switch statement with duplicate cases"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                "Duplicate case value '2' in switch statement."
+            ),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_switch_with_case_after_default() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            switch(5) {
+                case 2:
+                default:
+                case 4:
+            } 
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        let stmt = parser.parse_switch_statement();
+
+        match stmt {
+            Ok(_) => panic!(
+                "Expected failure to parse switch statement with cases after the default case."
+            ),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                "No more cases can be defined after the default clause."
+            ),
+        }
 
         Ok(())
     }

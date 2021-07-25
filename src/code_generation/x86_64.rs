@@ -638,6 +638,13 @@ impl Generator for Generator_x86_64 {
             panic!("Tried to pop from empty continue stack.");
         }
     }
+
+    // TODO: This method doesn't mark the input register as freed as of now
+    fn jump_if_equal_to(&mut self, r: usize, v: i32, label: &str) {
+        self.gen_binary_op("cmpq", Operand::Int(v), Operand::Reg(self.reg_name(r)));
+
+        self.gen_unary_op("je", Operand::RawString(label.into()));
+    }
 }
 
 fn sym_posn_to_string(posn: &SymPosition) -> String {
