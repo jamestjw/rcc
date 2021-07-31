@@ -1,0 +1,2 @@
+Error on line 6 in tests/input/input047-err.c:
+Tried to define enumerator 'a' that already exists.

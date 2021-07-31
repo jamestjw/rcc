@@ -77,6 +77,10 @@ impl<'a> Parser<'a> {
                 self.parse_struct_definition()?;
                 Ok(None)
             }
+            TokenType::ENUM => {
+                self.parse_enum_definition()?;
+                Ok(None)
+            }
             _ => {
                 let data_type = self.parse_type()?;
                 let ident = self.match_token(TokenType::IDENT)?;
@@ -247,6 +251,7 @@ impl<'a> Parser<'a> {
     // i. struct Person { int x; };
     // ii. struct Person { int x; } person1;
     // iii. struct Person person1;
+    // TODO: Handle anonymous structs
     fn parse_struct_definition(&mut self) -> Result<(), Box<dyn Error>> {
         self.match_token(TokenType::STRUCT)?;
         let struct_name_tok = self.match_token(TokenType::IDENT)?;
@@ -257,7 +262,11 @@ impl<'a> Parser<'a> {
             // Creating variable from previously defined struct
             // Could be a pointer to a struct
             TokenType::IDENT | TokenType::STAR => {
-                self.parse_struct_variable_declaration(&struct_name_tok.lexeme)?;
+                self.parse_composite_variable_declaration(
+                    &struct_name_tok.lexeme,
+                    SymClass::STRUCT,
+                    DataType::STRUCT,
+                )?;
                 self.match_token(TokenType::SEMI)?;
                 Ok(())
             }
@@ -289,7 +298,11 @@ impl<'a> Parser<'a> {
                     TokenType::SEMI => {}
                     // Could be defining a pointer to a struct
                     TokenType::IDENT | TokenType::STAR => {
-                        self.parse_struct_variable_declaration(&struct_name_tok.lexeme)?;
+                        self.parse_composite_variable_declaration(
+                            &struct_name_tok.lexeme,
+                            SymClass::STRUCT,
+                            DataType::STRUCT,
+                        )?;
                     }
                     _ => {
                         return Err(format!(
@@ -313,39 +326,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_struct_variable_declaration(
-        &mut self,
-        struct_name: &str,
-    ) -> Result<(), Box<dyn Error>> {
-        let indirection_count = self.parse_indirection()?;
-        let mut data_type = DataType::STRUCT;
-        for _ in 0..indirection_count {
-            data_type = to_pointer(data_type)?;
-        }
-
-        let ident = self.match_token(TokenType::IDENT)?;
-        match self
-            .composite_symbol_table
-            .find_symbol(struct_name, SymClass::STRUCT)
-        {
-            Some(struct_sym) => {
-                // We add the symbol here so that recursive calls work
-                let sym = self.global_symbol_table.add_symbol(
-                    ident.lexeme,
-                    data_type,
-                    0,
-                    SymType::VARIABLE,
-                    0,
-                    SymClass::GLOBAL,
-                );
-                sym.borrow_mut().type_sym = Some(Rc::clone(&struct_sym));
-
-                Ok(())
-            }
-            None => Err(format!("Referencing undefined struct: {}", &ident.lexeme).into()),
-        }
-    }
-
     fn parse_struct_members_declaration(&mut self) -> Result<SymbolTableEntry, Box<dyn Error>> {
         // TODO: Support nested structs
         // TODO: Support arrays in structs
@@ -357,6 +337,7 @@ impl<'a> Parser<'a> {
 
         let ident = self.match_token(TokenType::IDENT)?;
 
+        // TODO: Verify uniqueness of members
         let mut sym = SymbolTableEntry::new(
             // TODO: Parse datatype
             data_type,
@@ -386,6 +367,178 @@ impl<'a> Parser<'a> {
         }
 
         Ok(sym)
+    }
+
+    fn parse_enum_definition(&mut self) -> Result<(), Box<dyn Error>> {
+        self.match_token(TokenType::ENUM)?;
+
+        let enum_name_tok = self.match_token(TokenType::IDENT)?;
+
+        let next_token = self.current_token_type()?;
+
+        match next_token {
+            // Creating variable from previously defined struct
+            // Could be a pointer to a struct
+            TokenType::IDENT | TokenType::STAR => {
+                self.parse_composite_variable_declaration(
+                    &enum_name_tok.lexeme,
+                    SymClass::ENUM,
+                    DataType::ENUM,
+                )?;
+                self.match_token(TokenType::SEMI)?;
+                Ok(())
+            }
+            TokenType::LBRACE => {
+                if self
+                    .composite_symbol_table
+                    .find_symbol(&enum_name_tok.lexeme, None)
+                    .is_some()
+                {
+                    return Err(format!(
+                        "Tried to define enum '{}' that already exists.",
+                        &enum_name_tok.lexeme
+                    )
+                    .into());
+                }
+
+                let sym = self.composite_symbol_table.add_symbol(
+                    enum_name_tok.lexeme.clone(),
+                    DataType::NONE,
+                    0,
+                    SymType::ENUM,
+                    0,
+                    SymClass::ENUM,
+                );
+
+                self.match_token(TokenType::LBRACE)?;
+
+                // Only parse members if the struct is not empty
+                if self.is_token_type(TokenType::RBRACE)? {
+                    return Err("Enums with no members are invalid.".into());
+                }
+
+                let mut next_index = 0;
+
+                loop {
+                    if self.is_token_type(TokenType::RBRACE)? {
+                        break;
+                    }
+
+                    let enum_mem_tok = self.match_token(TokenType::IDENT)?;
+
+                    if self.is_token_type(TokenType::ASSIGN)? {
+                        self.consume()?;
+                        let enum_int_tok = self.match_token(TokenType::INTLIT)?;
+                        if enum_int_tok.int_value <= next_index {
+                            return Err(
+                                format!("Invalid enum value {}.", enum_int_tok.int_value).into()
+                            );
+                        }
+                        next_index = enum_int_tok.int_value;
+                    }
+
+                    if self
+                        .global_symbol_table
+                        .find_symbol(&enum_mem_tok.lexeme, None)
+                        .is_some()
+                    {
+                        return Err(format!(
+                            "Tried to define enumerator '{}' that already exists.",
+                            &enum_mem_tok.lexeme
+                        )
+                        .into());
+                    }
+
+                    let member_sym = self.global_symbol_table.add_symbol(
+                        // TODO: Parse datatype
+                        enum_mem_tok.lexeme.clone(),
+                        DataType::INT,
+                        next_index,
+                        SymType::ENUMERATOR,
+                        0,
+                        // TODO: Should this be global?
+                        SymClass::GLOBAL,
+                    );
+                    member_sym.borrow_mut().type_sym = Some(Rc::clone(&sym));
+
+                    next_index += 1;
+
+                    if self.is_token_type(TokenType::COMMA)? {
+                        self.consume()?;
+                    }
+                }
+
+                self.match_token(TokenType::RBRACE)?;
+
+                // We might have a enum variable definition following definition of a enum.
+                let next_token = self.current_token_type()?;
+
+                match next_token {
+                    TokenType::SEMI => {}
+                    // Could be defining a pointer to a enum
+                    TokenType::IDENT | TokenType::STAR => {
+                        self.parse_composite_variable_declaration(
+                            &enum_name_tok.lexeme,
+                            SymClass::ENUM,
+                            DataType::ENUM,
+                        )?;
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Syntax error, expected ';' or identifier but encountered {} instead",
+                            next_token
+                        )
+                        .into());
+                    }
+                }
+
+                self.match_token(TokenType::SEMI)?;
+                Ok(())
+            }
+            _ => {
+                return Err(format!(
+                    "Syntax error, expected '{{' or identifier but encountered {} instead",
+                    next_token
+                )
+                .into());
+            }
+        }
+    }
+
+    fn parse_composite_variable_declaration(
+        &mut self,
+        comp_name: &str,
+        composite_sym_class: SymClass,
+        data_type: DataType,
+    ) -> Result<(), Box<dyn Error>> {
+        let indirection_count = self.parse_indirection()?;
+        let mut final_data_type = data_type;
+        for _ in 0..indirection_count {
+            final_data_type = to_pointer(final_data_type)?;
+        }
+
+        let ident = self.match_token(TokenType::IDENT)?;
+        let class_name_str = composite_sym_class.name();
+        match self
+            .composite_symbol_table
+            .find_symbol(comp_name, Some(composite_sym_class))
+        {
+            Some(comp_sym) => {
+                // We add the symbol here so that recursive calls work
+                let sym = self.global_symbol_table.add_symbol(
+                    ident.lexeme,
+                    final_data_type,
+                    0,
+                    SymType::VARIABLE,
+                    0,
+                    SymClass::GLOBAL,
+                );
+                sym.borrow_mut().type_sym = Some(Rc::clone(&comp_sym));
+
+                Ok(())
+            }
+            None => Err(format!("Referencing undefined {}: {}", class_name_str, comp_name).into()),
+        }
     }
 
     fn parse_compound_statement(
@@ -731,7 +884,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("x", SymClass::GLOBAL)
+            .find_symbol("x", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -753,7 +906,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("x", SymClass::GLOBAL)
+            .find_symbol("x", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -766,7 +919,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("y", SymClass::GLOBAL)
+            .find_symbol("y", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -804,7 +957,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("x", SymClass::GLOBAL)
+            .find_symbol("x", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -826,7 +979,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("x", SymClass::GLOBAL)
+            .find_symbol("x", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -839,7 +992,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("y", SymClass::GLOBAL)
+            .find_symbol("y", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -869,7 +1022,7 @@ mod tests {
         match_ast_node(Some(&expr), expected);
         match parser
             .global_symbol_table
-            .find_symbol("main", SymClass::GLOBAL)
+            .find_symbol("main", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -919,7 +1072,7 @@ mod tests {
         match_ast_node(Some(&expr), expected);
         match parser
             .global_symbol_table
-            .find_symbol("test", SymClass::GLOBAL)
+            .find_symbol("test", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -958,7 +1111,7 @@ mod tests {
         match_ast_node(Some(&expr), expected);
         match parser
             .global_symbol_table
-            .find_symbol("test", SymClass::GLOBAL)
+            .find_symbol("test", Some(SymClass::GLOBAL))
         {
             Some(new_sym) => {
                 let new_sym = new_sym.borrow();
@@ -1015,7 +1168,7 @@ mod tests {
 
         match parser
             .composite_symbol_table
-            .find_symbol("Person", SymClass::STRUCT)
+            .find_symbol("Person", Some(SymClass::STRUCT))
         {
             Some(sym) => {
                 let sym = sym.borrow();
@@ -1051,7 +1204,7 @@ mod tests {
 
         let struct_sym = match parser
             .composite_symbol_table
-            .find_symbol("Person", SymClass::STRUCT)
+            .find_symbol("Person", Some(SymClass::STRUCT))
         {
             Some(sym) => {
                 let sym = Rc::clone(&sym);
@@ -1078,7 +1231,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("person1", SymClass::GLOBAL)
+            .find_symbol("person1", Some(SymClass::GLOBAL))
         {
             Some(sym) => {
                 let sym = sym.borrow();
@@ -1112,7 +1265,7 @@ mod tests {
 
         match parser
             .global_symbol_table
-            .find_symbol("person1", SymClass::GLOBAL)
+            .find_symbol("person1", Some(SymClass::GLOBAL))
         {
             Some(sym) => {
                 let sym = sym.borrow();
@@ -1684,5 +1837,360 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn parse_enum_definition_without_variable() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            enum Person {
+                a,
+                b,
+                c = 5,
+                d,
+            };
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        parser.parse_enum_definition()?;
+
+        match parser
+            .composite_symbol_table
+            .find_symbol("Person", Some(SymClass::ENUM))
+        {
+            Some(sym) => {
+                let sym = Rc::clone(&sym);
+                assert_eq!(sym.borrow().name, "Person");
+                assert_eq!(sym.borrow().sym_type, SymType::ENUM);
+                assert_eq!(sym.borrow().sym_class, SymClass::ENUM);
+                sym
+            }
+            None => {
+                panic!("Enum was not added to symbol table.");
+            }
+        };
+
+        match parser
+            .global_symbol_table
+            .find_symbol("a", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 0);
+            }
+            None => {
+                panic!("Enumerator a was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("b", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 1);
+            }
+            None => {
+                panic!("Enumerator b was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("c", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 5);
+            }
+            None => {
+                panic!("Enumerator c was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("d", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 6);
+            }
+            None => {
+                panic!("Enumerator d was not defined on the global symbol table.");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_enum_definition_with_variable() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            enum Person {
+                a,
+                b,
+                c = 5,
+                d,
+            } person;
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        parser.parse_enum_definition()?;
+
+        match parser
+            .composite_symbol_table
+            .find_symbol("Person", Some(SymClass::ENUM))
+        {
+            Some(sym) => {
+                let sym = Rc::clone(&sym);
+                assert_eq!(sym.borrow().name, "Person");
+                assert_eq!(sym.borrow().sym_type, SymType::ENUM);
+                assert_eq!(sym.borrow().sym_class, SymClass::ENUM);
+                sym
+            }
+            None => {
+                panic!("Enum was not added to symbol table.");
+            }
+        };
+
+        match parser
+            .global_symbol_table
+            .find_symbol("a", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 0);
+            }
+            None => {
+                panic!("Enumerator a was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("b", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 1);
+            }
+            None => {
+                panic!("Enumerator b was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("c", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 5);
+            }
+            None => {
+                panic!("Enumerator c was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("d", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 6);
+            }
+            None => {
+                panic!("Enumerator d was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("person", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::VARIABLE);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.data_type, DataType::ENUM);
+            }
+            None => {
+                panic!("Enumerator d was not defined on the global symbol table.");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_enum_definition_with_later_variable() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            enum Person {
+                a,
+                b,
+                c = 5,
+                d,
+            };
+            enum Person person;
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        parser.parse_enum_definition()?;
+        parser.parse_enum_definition()?;
+
+        match parser
+            .composite_symbol_table
+            .find_symbol("Person", Some(SymClass::ENUM))
+        {
+            Some(sym) => {
+                let sym = Rc::clone(&sym);
+                assert_eq!(sym.borrow().name, "Person");
+                assert_eq!(sym.borrow().sym_type, SymType::ENUM);
+                assert_eq!(sym.borrow().sym_class, SymClass::ENUM);
+                sym
+            }
+            None => {
+                panic!("Enum was not added to symbol table.");
+            }
+        };
+
+        match parser
+            .global_symbol_table
+            .find_symbol("a", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 0);
+            }
+            None => {
+                panic!("Enumerator a was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("b", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 1);
+            }
+            None => {
+                panic!("Enumerator b was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("c", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 5);
+            }
+            None => {
+                panic!("Enumerator c was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("d", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::ENUMERATOR);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.initial_value, 6);
+            }
+            None => {
+                panic!("Enumerator d was not defined on the global symbol table.");
+            }
+        }
+
+        match parser
+            .global_symbol_table
+            .find_symbol("person", Some(SymClass::GLOBAL))
+        {
+            Some(sym) => {
+                let sym = sym.borrow();
+                assert_eq!(sym.sym_type, SymType::VARIABLE);
+                assert_eq!(sym.sym_class, SymClass::GLOBAL);
+                assert_eq!(sym.data_type, DataType::ENUM);
+            }
+            None => {
+                panic!("Enumerator d was not defined on the global symbol table.");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_empty_enum_definition() {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            enum Person {};
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        match parser.parse_enum_definition() {
+            Ok(_) => {}
+            Err(e) => {
+                assert_eq!(e.to_string(), "Enums with no members are invalid.");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_empty_enum_definition_with_invalid_value() {
+        let mut scanner = Scanner::new_from_string(String::from(
+            "
+            enum Person {
+                a,
+                b,
+                c = 1,
+            };
+            ",
+        ));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        match parser.parse_enum_definition() {
+            Ok(_) => {}
+            Err(e) => {
+                assert_eq!(e.to_string(), "Invalid enum value 1.");
+            }
+        }
     }
 }

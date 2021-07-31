@@ -312,8 +312,12 @@ impl Scanner {
         if lexeme.starts_with('d') && lexeme == "default" {
             return TokenType::DEFAULT;
         }
-        if lexeme.starts_with('e') && lexeme == "else" {
-            return TokenType::ELSE;
+        if lexeme.starts_with('e') {
+            if lexeme == "else" {
+                return TokenType::ELSE;
+            } else if lexeme == "enum" {
+                return TokenType::ENUM;
+            }
         }
         if lexeme.starts_with('f') && lexeme == "for" {
             return TokenType::FOR;

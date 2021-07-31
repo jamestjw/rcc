@@ -1,0 +1,2 @@
+Error on line 5 in tests/input/input048-err.c:
+Tried to define enum 'Person' that already exists.

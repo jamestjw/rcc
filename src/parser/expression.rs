@@ -241,7 +241,7 @@ impl<'a> Parser<'a> {
                     if symtable_entry.is_none() {
                         symtable_entry = match self
                             .global_symbol_table
-                            .find_symbol(&token.lexeme, SymClass::GLOBAL)
+                            .find_symbol(&token.lexeme, Some(SymClass::GLOBAL))
                         {
                             Some(new_sym) => Some(new_sym),
                             None => {
@@ -254,12 +254,19 @@ impl<'a> Parser<'a> {
                         };
                     }
 
-                    let mut node = ASTnode::new_leaf(
-                        ASTop::IDENT,
-                        0,
-                        symtable_entry.as_ref().unwrap().borrow().data_type,
-                    );
-                    node.symtable_entry = Some(Rc::clone(symtable_entry.as_ref().unwrap()));
+                    let data_type = symtable_entry.as_ref().unwrap().borrow().data_type;
+                    let initial_value = symtable_entry.as_ref().unwrap().borrow().initial_value;
+
+                    let node = match symtable_entry.as_ref().unwrap().borrow().sym_type {
+                        SymType::ENUMERATOR => {
+                            ASTnode::new_leaf(ASTop::INTLIT, initial_value, DataType::INT)
+                        }
+                        _ => {
+                            let mut node = ASTnode::new_leaf(ASTop::IDENT, 0, data_type);
+                            node.symtable_entry = Some(Rc::clone(symtable_entry.as_ref().unwrap()));
+                            node
+                        }
+                    };
 
                     Ok(node)
                 }

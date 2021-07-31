@@ -389,7 +389,7 @@ impl Generator for Generator_x86_64 {
         for (sym_name, entry) in &symtable.table {
             let mut entry = entry.borrow_mut();
             match entry.sym_type {
-                SymType::VARIABLE => {
+                SymType::VARIABLE | SymType::ENUMERATOR => {
                     // Global variables can be referred directly to by their names
                     entry.posn = SymPosition::Label(sym_name.clone());
 
@@ -485,6 +485,7 @@ impl Generator for Generator_x86_64 {
                     }
                     entry.size = struct_size;
                 }
+                SymType::ENUM => {}
             }
         }
     }
@@ -516,6 +517,7 @@ impl Generator for Generator_x86_64 {
             DataType::VOID => 0,
             DataType::NONE => 0,
             DataType::STRUCT => 0,
+            DataType::ENUM => 4,
         }
     }
 

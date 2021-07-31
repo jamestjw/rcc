@@ -159,7 +159,7 @@ pub fn generate_code_for_node(
     let data_size = generator.data_type_to_size(node.data_type);
 
     match node.op {
-        ASTop::INTLIT => Some(generator.load_integer(node.int_value)),
+        ASTop::INTLIT | ASTop::ENUM => Some(generator.load_integer(node.int_value)),
         ASTop::ADD => Some(generator.add(left_reg.unwrap(), right_reg.unwrap())),
         ASTop::MINUS => Some(generator.minus(left_reg.unwrap(), right_reg.unwrap())),
         ASTop::MULTIPLY => Some(generator.multiply(left_reg.unwrap(), right_reg.unwrap())),

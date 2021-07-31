@@ -25,6 +25,7 @@ enum_str! {
         VOID,
         STRUCT,
         STRUCTPTR,
+        ENUM,
     }
 }
 
@@ -59,6 +60,8 @@ pub enum SymType {
     FUNCTION,
     ARRAY(u16),
     STRUCT,
+    ENUM,
+    ENUMERATOR,
 }
 
 impl SymType {
@@ -68,6 +71,8 @@ impl SymType {
             SymType::FUNCTION => "FUNCTION",
             SymType::ARRAY(_) => "ARRAY",
             SymType::STRUCT => "STRUCT",
+            SymType::ENUM => "ENUM",
+            SymType::ENUMERATOR => "ENUMERATOR",
         }
     }
 }
@@ -79,6 +84,7 @@ enum_str! {
         PARAM,
         MEMBER,
         STRUCT,
+        ENUM,
     }
 }
 
@@ -133,16 +139,19 @@ impl SymbolTable {
     pub fn find_symbol(
         &self,
         lexeme: &str,
-        sym_class: SymClass,
+        sym_class: Option<SymClass>,
     ) -> Option<Rc<RefCell<SymbolTableEntry>>> {
         match self.table.get(lexeme) {
-            Some(sym) => {
-                if sym.borrow().sym_class == sym_class {
-                    Some(Rc::clone(sym))
-                } else {
-                    None
+            Some(sym) => match sym_class {
+                Some(sym_class) => {
+                    if sym.borrow().sym_class == sym_class {
+                        Some(Rc::clone(sym))
+                    } else {
+                        None
+                    }
                 }
-            }
+                None => Some(Rc::clone(sym)),
+            },
             None => None,
         }
     }
@@ -153,7 +162,7 @@ impl SymbolTable {
 #[derive(Debug)]
 pub struct SymbolTableEntry {
     pub data_type: DataType,
-    pub initial_value: i32, // Initial value for ints
+    pub initial_value: i32, // Initial value for ints, also used to contain store value of enumerators
     pub name: String,
     pub size: u32, // Size of symbol, i.e. sizeof(name). We will also use this to represent the size to allocate on the stack for the function.
     pub sym_type: SymType,
