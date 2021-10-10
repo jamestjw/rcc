@@ -592,7 +592,7 @@ impl Generator for Generator_x86_64 {
 
         self.gen_unary_op(comp_op, Operand::Reg("al".to_string()));
         self.gen_binary_op(
-            "movzbl",
+            "movzbq",
             Operand::Reg("al".to_string()),
             Operand::Reg(self.reg_name(r1)),
         );
