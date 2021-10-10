@@ -105,6 +105,16 @@ impl fmt::Display for TokenType {
     }
 }
 
+impl TokenType {
+    pub fn convertible_to_data_type(&self) -> bool {
+        match self {
+            TokenType::INT | TokenType::CHAR | TokenType::STRUCT | TokenType::VOID => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub int_value: i32,

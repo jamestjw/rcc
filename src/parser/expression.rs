@@ -116,9 +116,18 @@ impl<'a> Parser<'a> {
                         // Given the ASTop, the symtable entry should always be present, hence this is safe
                         let struct_var_sym = Rc::clone(left.symtable_entry.as_ref().unwrap());
                         let struct_var_name = &struct_var_sym.borrow().name;
-                        if op_tok_type == TokenType::DOT
-                            && struct_var_sym.borrow().data_type != DataType::STRUCT
-                        {
+
+                        let struct_sym = match left.type_sym.as_ref() {
+                            Some(t) => Rc::clone(t),
+                            None => {
+                                return Err(format!(
+                                    "Member access on '{}' is invalid, it is only possible with struct types.",
+                                    struct_var_name
+                                ).into());
+                            }
+                        };
+
+                        if op_tok_type == TokenType::DOT && left.data_type != DataType::STRUCT {
                             return Err(format!(
                                 "Member access on '{}' is invalid, it is only possible with struct variables.",
                                 struct_var_name
@@ -126,8 +135,7 @@ impl<'a> Parser<'a> {
                             .into());
                         }
 
-                        if op_tok_type == TokenType::ARROW
-                            && struct_var_sym.borrow().data_type != DataType::STRUCTPTR
+                        if op_tok_type == TokenType::ARROW && left.data_type != DataType::STRUCTPTR
                         {
                             return Err(format!(
                                 "Member access on '{}' is invalid, it is only possible with struct pointer variables.",
@@ -135,9 +143,6 @@ impl<'a> Parser<'a> {
                             )
                             .into());
                         }
-
-                        let struct_sym =
-                            Rc::clone(struct_var_sym.borrow().type_sym.as_ref().unwrap());
 
                         // Consume the DOT/ARROW and IDENT containing the member name
                         self.consume()?;
@@ -222,13 +227,38 @@ impl<'a> Parser<'a> {
     }
 
     pub fn primary_expr(&mut self) -> Result<Box<ASTnode>, Box<dyn Error>> {
-        match &self.current_token {
+        // Look for type casts
+        let typecast_dtype: Option<(DataType, Option<Rc<RefCell<SymbolTableEntry>>>)> =
+            match self.current_token_type() {
+                Ok(tok) => {
+                    if tok == TokenType::LPAREN
+                        && self.peek_next()?.token_type.convertible_to_data_type()
+                    {
+                        // Consume left parenthesis
+                        self.consume()?;
+                        let (dtype, comp_symbol_entry) = self.parse_type()?;
+                        self.match_token(TokenType::RPAREN)?;
+                        Some((dtype, comp_symbol_entry))
+                    } else {
+                        None
+                    }
+                }
+
+                Err(_) => {
+                    return Err(format!(
+                        "Syntax error, expected primary expression but no more tokens were found.",
+                    )
+                    .into());
+                }
+            };
+
+        let mut node = match &self.current_token {
             Some(tok) => match tok.token_type {
                 TokenType::LPAREN => {
                     self.consume()?;
                     let expr = self.expr_by_precedence(0)?;
                     self.match_token(TokenType::RPAREN)?;
-                    Ok(expr)
+                    expr
                 }
                 TokenType::IDENT => {
                     let token = self.match_token(TokenType::IDENT)?;
@@ -257,7 +287,8 @@ impl<'a> Parser<'a> {
                     let data_type = symtable_entry.as_ref().unwrap().borrow().data_type;
                     let initial_value = symtable_entry.as_ref().unwrap().borrow().initial_value;
 
-                    let node = match symtable_entry.as_ref().unwrap().borrow().sym_type {
+                    let mut node = match symtable_entry.as_ref().unwrap().borrow().sym_type {
+                        // TODO: Should type casting be allowed on enumerators?
                         SymType::ENUMERATOR => {
                             ASTnode::new_leaf(ASTop::INTLIT, initial_value, DataType::INT)
                         }
@@ -268,23 +299,32 @@ impl<'a> Parser<'a> {
                         }
                     };
 
-                    Ok(node)
+                    match symtable_entry.as_ref().unwrap().borrow().type_sym.as_ref() {
+                        Some(t) => {
+                            node.type_sym = Some(Rc::clone(t));
+                        }
+                        _ => {}
+                    }
+
+                    node
                 }
                 TokenType::INTLIT => {
                     let int_value = self.consume()?.int_value;
-                    Ok(ASTnode::new_leaf(ASTop::INTLIT, int_value, DataType::INT))
+                    ASTnode::new_leaf(ASTop::INTLIT, int_value, DataType::INT)
                 }
                 TokenType::STRLIT => {
                     let string_table_id = self.consume()?.string_table_id;
                     let mut node = ASTnode::new_leaf(ASTop::STRLIT, 0, DataType::CHARPTR);
                     node.string_table_id = string_table_id;
-                    Ok(node)
+                    node
                 }
-                _ => Err(format!(
-                    "Syntax error, expected primary expression but found '{}' instead.",
-                    tok.token_type
-                )
-                .into()),
+                _ => {
+                    return Err(format!(
+                        "Syntax error, expected primary expression but found '{}' instead.",
+                        tok.token_type
+                    )
+                    .into())
+                }
             },
             None => {
                 return Err(format!(
@@ -292,7 +332,17 @@ impl<'a> Parser<'a> {
                 )
                 .into());
             }
+        };
+
+        match typecast_dtype {
+            Some((dtype, comp_symbol_entry)) => {
+                node.data_type = dtype;
+                node.type_sym = comp_symbol_entry;
+            }
+            None => {}
         }
+
+        Ok(node)
     }
 
     // TODO: Currently only support one parameter with no type checking
@@ -1340,6 +1390,137 @@ mod tests {
             DataType::INT,
         );
         let expected = ASTnode::new_boxed(ASTop::GLUE, assign_x, assign_y, DataType::NONE);
+
+        match_ast_node(Some(&expr), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_type_cast_void_star() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("(void *) x"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let expr = parser.primary_expr()?;
+
+        assert_eq!(expr.data_type, DataType::VOIDPTR);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_type_cast_void_star_assignment() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("y = (void *) x"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "y".to_string(),
+            DataType::VOIDPTR,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let expr = parser.expr_by_precedence(0)?;
+
+        let expected = ASTnode::new_boxed(
+            ASTop::ASSIGN,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::VOIDPTR),
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::VOIDPTR),
+            DataType::VOIDPTR,
+        );
+
+        match_ast_node(Some(&expr), expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_type_cast_struct_star() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("(struct Person *) x"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let struct_sym = parser.composite_symbol_table.add_symbol(
+            "Person".to_string(),
+            DataType::NONE,
+            0,
+            SymType::STRUCT,
+            0,
+            SymClass::STRUCT,
+        );
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let expr = parser.primary_expr()?;
+
+        assert_eq!(expr.data_type, DataType::STRUCTPTR);
+        assert!(Rc::ptr_eq(&struct_sym, expr.type_sym.as_ref().unwrap()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_type_cast_struct_star_member_access() -> Result<(), Box<dyn Error>> {
+        let mut scanner = Scanner::new_from_string(String::from("((struct Person *) x)->y"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let struct_sym = parser.composite_symbol_table.add_symbol(
+            "Person".to_string(),
+            DataType::NONE,
+            0,
+            SymType::STRUCT,
+            0,
+            SymClass::STRUCT,
+        );
+        let struct_member_sym = SymbolTableEntry::new(
+            // TODO: Parse datatype
+            DataType::INT,
+            0,
+            String::from("y"),
+            0,
+            SymType::VARIABLE,
+            SymClass::MEMBER,
+        );
+        struct_sym.borrow_mut().add_member(struct_member_sym);
+
+        let _sym_x = parser.global_symbol_table.add_symbol(
+            "x".to_string(),
+            DataType::INT,
+            0,
+            SymType::VARIABLE,
+            0,
+            SymClass::GLOBAL,
+        );
+
+        let expr = parser.expr_by_precedence(0)?;
+
+        assert_eq!(expr.data_type, DataType::INT);
+
+        let expected = ASTnode::new_unary(
+            ASTop::PTRMEMBER,
+            ASTnode::new_leaf(ASTop::IDENT, 0, DataType::STRUCTPTR),
+            DataType::INT,
+        );
 
         match_ast_node(Some(&expr), expected);
 

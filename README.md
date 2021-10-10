@@ -32,6 +32,8 @@ I will try to document the progress of this project as best as I can. I will mos
 
 10/10/2021 - Accept struct pointers in function parameters
 
+11/10/2021 - Implement type-casting (without warnings for unsound casts)
+
 ## Caveats
 - Return statements are required in main functions.
 - Declarations in functions (in the local scope) are not supported yet.

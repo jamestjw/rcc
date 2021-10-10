@@ -61,6 +61,7 @@ pub struct ASTnode {
     // The type of data contained in this node
     // DataType::NONE if this node yields nothing
     pub data_type: DataType,
+    pub type_sym: Option<Rc<RefCell<SymbolTableEntry>>>,
     // ID to a string table entry for string literals
     pub string_table_id: Option<usize>,
 }
@@ -77,6 +78,7 @@ impl ASTnode {
             label: None,
             data_type,
             string_table_id: None,
+            type_sym: None,
         })
     }
 
@@ -91,6 +93,7 @@ impl ASTnode {
             label: None,
             data_type,
             string_table_id: None,
+            type_sym: None,
         })
     }
 
@@ -105,6 +108,7 @@ impl ASTnode {
             label: None,
             data_type,
             string_table_id: None,
+            type_sym: None,
         })
     }
 
@@ -124,6 +128,7 @@ impl ASTnode {
             label: None,
             data_type,
             string_table_id: None,
+            type_sym: None,
         })
     }
 
@@ -138,6 +143,7 @@ impl ASTnode {
             label: None,
             data_type: DataType::NONE,
             string_table_id: None,
+            type_sym: None,
         })
     }
 }

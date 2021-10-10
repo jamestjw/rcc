@@ -22,6 +22,7 @@ pub use symbol_table::*;
 pub struct Parser<'a> {
     token_generator: &'a mut Scanner,
     current_token: Option<Token>,
+    next_token: Option<Token>,
     pub global_symbol_table: SymbolTable,
     pub composite_symbol_table: SymbolTable,
     pub current_func_sym: Option<Rc<RefCell<SymbolTableEntry>>>, // Current function that we are parsing
@@ -35,6 +36,7 @@ impl<'a> Parser<'a> {
         Ok(Parser {
             token_generator,
             current_token: Some(first_token),
+            next_token: None,
             global_symbol_table: SymbolTable::new(),
             composite_symbol_table: SymbolTable::new(),
             current_func_sym: None,
@@ -45,14 +47,31 @@ impl<'a> Parser<'a> {
 
     // Consume current_token and load next token as the current_token
     fn consume(&mut self) -> Result<Token, Box<dyn Error>> {
-        if self.current_token.is_none() {
+        let next_token = if self.next_token.is_some() {
+            self.next_token.take().unwrap()
+        } else if self.current_token.is_none() {
             return Err("Unable to consume tokens when none are available.".into());
-        }
-        let next_token = self.token_generator.next_token()?;
+        } else {
+            self.token_generator.next_token()?
+        };
+
         let current_token_clone = self.current_token.replace(next_token);
 
         // Safe to unwrap since we know that it contains something
         Ok(current_token_clone.unwrap())
+    }
+
+    fn peek_next(&mut self) -> Result<Token, Box<dyn Error>> {
+        // If next token is already loaded, just return it.
+        if self.next_token.is_some() {
+            return Ok(self.next_token.as_ref().cloned().unwrap());
+        }
+
+        // Next token is not yet loaded
+        let next_token = self.token_generator.next_token()?;
+        self.next_token.replace(next_token.clone());
+
+        Ok(next_token)
     }
 
     // Consume the current if it matches the given type, else returns an error
@@ -172,6 +191,7 @@ fn to_pointer(data_type: DataType) -> Result<DataType, String> {
     match data_type {
         DataType::INT => Ok(DataType::INTPTR),
         DataType::CHAR => Ok(DataType::CHARPTR),
+        DataType::VOID => Ok(DataType::VOIDPTR),
         DataType::STRUCT => Ok(DataType::STRUCTPTR),
         _ => Err(format!(
             "Unable to convert {} type to a pointer.",
@@ -184,6 +204,7 @@ pub fn pointer_to(data_type: DataType) -> Result<DataType, String> {
     match data_type {
         DataType::INTPTR => Ok(DataType::INT),
         DataType::CHARPTR => Ok(DataType::CHAR),
+        DataType::STRUCTPTR => Ok(DataType::STRUCT),
         _ => Err(format!("{} is not a valid pointer type.", data_type.name())),
     }
 }
@@ -249,5 +270,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn peeking() {
+        let mut scanner = Scanner::new_from_string(String::from("int x = 5 + 3;"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+
+        assert_eq!(parser.current_token.clone().unwrap().lexeme, "int");
+        assert_eq!(parser.peek_next().unwrap().clone().lexeme, "x");
+        // Test that peeking twice doesn't change anything.
+        assert_eq!(parser.peek_next().unwrap().clone().lexeme, "x");
+        assert_eq!(parser.consume().unwrap().lexeme, "int");
+        assert_eq!(parser.current_token.clone().unwrap().lexeme, "x");
+        assert_eq!(
+            parser.peek_next().unwrap().clone().token_type,
+            TokenType::ASSIGN
+        );
+        assert_eq!(
+            parser.peek_next().unwrap().clone().token_type,
+            TokenType::ASSIGN
+        );
     }
 }

@@ -467,10 +467,11 @@ impl Generator for Generator_x86_64 {
                             Some(node) => {
                                 let mem_size = self.data_type_to_size(node.borrow().data_type);
                                 node.borrow_mut().size = mem_size as u32;
-                                struct_size += mem_size;
+
                                 // TODO: Handle aligning of struct members
                                 node.borrow_mut().posn =
-                                    SymPosition::StructBaseOffset(mem_size as i32);
+                                    SymPosition::StructBaseOffset(struct_size as i32);
+                                struct_size += mem_size;
                                 if node.borrow().next.is_some() {
                                     member_node =
                                         Some(Rc::clone(node.borrow().next.as_ref().unwrap()));
@@ -514,6 +515,7 @@ impl Generator for Generator_x86_64 {
             DataType::INTPTR => PTR_SIZE,
             DataType::CHARPTR => PTR_SIZE,
             DataType::STRUCTPTR => PTR_SIZE,
+            DataType::VOIDPTR => PTR_SIZE,
             DataType::VOID => 0,
             DataType::NONE => 0,
             DataType::STRUCT => 0,

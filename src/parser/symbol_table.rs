@@ -23,6 +23,7 @@ enum_str! {
         CHAR,
         CHARPTR,
         VOID,
+        VOIDPTR,
         STRUCT,
         STRUCTPTR,
         ENUM,
