@@ -94,11 +94,35 @@ impl<'a> Parser<'a> {
     }
 
     // Parses the next token as a type, e.g. INT, VOID
-    pub fn parse_type(&mut self) -> Result<DataType, Box<dyn Error>> {
-        let mut res = match &self.current_token {
+    pub fn parse_type(
+        &mut self,
+    ) -> Result<(DataType, Option<Rc<RefCell<SymbolTableEntry>>>), Box<dyn Error>> {
+        let mut comp_symbol_entry: Option<Rc<RefCell<SymbolTableEntry>>> = None;
+
+        let mut dtype = match &self.current_token {
             Some(tok) => match tok.token_type {
                 TokenType::CHAR | TokenType::INT | TokenType::VOID => {
-                    DataType::try_from(tok.token_type)?
+                    let tok_type = tok.token_type;
+                    self.consume()?;
+                    DataType::try_from(tok_type)?
+                }
+                TokenType::STRUCT => {
+                    self.consume()?;
+                    let struct_name_tok = self.match_token(TokenType::IDENT)?;
+                    comp_symbol_entry = match self
+                        .composite_symbol_table
+                        .find_symbol(&struct_name_tok.lexeme, Some(SymClass::STRUCT))
+                    {
+                        Some(sym) => Some(sym),
+                        _ => {
+                            return Err(format!(
+                                "Referencing undefined struct {}.",
+                                &struct_name_tok.lexeme
+                            )
+                            .into());
+                        }
+                    };
+                    DataType::STRUCT
                 }
                 _ => {
                     return Err(format!(
@@ -113,15 +137,13 @@ impl<'a> Parser<'a> {
             }
         };
 
-        self.consume()?;
-
         let indirection_count = self.parse_indirection()?;
 
         for _ in 0..indirection_count {
-            res = to_pointer(res)?;
+            dtype = to_pointer(dtype)?;
         }
 
-        Ok(res)
+        Ok((dtype, comp_symbol_entry))
     }
 
     fn parse_indirection(&mut self) -> Result<u8, Box<dyn Error>> {
@@ -197,8 +219,9 @@ mod tests {
         let res = parser.parse_type();
 
         match res {
-            Ok(t) => {
-                assert_eq!(t, DataType::INT);
+            Ok((dtype, comp_symbol_entry)) => {
+                assert_eq!(dtype, DataType::INT);
+                assert!(comp_symbol_entry.is_none());
 
                 // Check that the INT token has been consumed
                 assert_eq!(parser.current_token.unwrap().token_type, TokenType::IDENT);

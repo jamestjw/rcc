@@ -82,7 +82,8 @@ impl<'a> Parser<'a> {
                 Ok(None)
             }
             _ => {
-                let data_type = self.parse_type()?;
+                // TODO: Handle composite types
+                let (data_type, _) = self.parse_type()?;
                 let ident = self.match_token(TokenType::IDENT)?;
 
                 match &self.current_token {
@@ -208,7 +209,7 @@ impl<'a> Parser<'a> {
     // We require these parameters as these tokens should have
     // been scanned prior to invocation of this function
     fn parse_func_param_declaration(&mut self) -> Result<SymbolTableEntry, Box<dyn Error>> {
-        let data_type = self.parse_type()?;
+        let (data_type, comp_symbol_entry) = self.parse_type()?;
 
         if data_type == DataType::VOID {
             return Err("Unable to define function parameters with void type.".into());
@@ -225,6 +226,7 @@ impl<'a> Parser<'a> {
             SymType::VARIABLE,
             SymClass::PARAM,
         );
+        sym.type_sym = comp_symbol_entry;
 
         match &self.current_token {
             Some(token) => {
@@ -261,6 +263,7 @@ impl<'a> Parser<'a> {
         match next_token {
             // Creating variable from previously defined struct
             // Could be a pointer to a struct
+            // e.g. struct Person person1;
             TokenType::IDENT | TokenType::STAR => {
                 self.parse_composite_variable_declaration(
                     &struct_name_tok.lexeme,
@@ -329,7 +332,7 @@ impl<'a> Parser<'a> {
     fn parse_struct_members_declaration(&mut self) -> Result<SymbolTableEntry, Box<dyn Error>> {
         // TODO: Support nested structs
         // TODO: Support arrays in structs
-        let data_type = self.parse_type()?;
+        let (data_type, _) = self.parse_type()?;
 
         if data_type == DataType::VOID {
             return Err("Unable to define struct members with void type.".into());
@@ -1135,6 +1138,74 @@ mod tests {
                 assert_eq!(param_sym_2.name, "y");
             }
             None => panic!("New symbol table entry not found"),
+        }
+    }
+
+    #[test]
+    fn parse_func_declaration_with_struct_param() {
+        let mut scanner =
+            Scanner::new_from_string(String::from("int test(struct Person *p) { return 1; }"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        let struct_sym = parser.composite_symbol_table.add_symbol(
+            "Person".to_string(),
+            DataType::NONE,
+            0,
+            SymType::STRUCT,
+            0,
+            SymClass::STRUCT,
+        );
+
+        let expr = parser.parse_global_declaration().unwrap().unwrap();
+
+        let expected = ASTnode::new_unary(
+            ASTop::FUNCTION,
+            ASTnode::new_unary(
+                ASTop::RETURN,
+                ASTnode::new_leaf(ASTop::INTLIT, 1, DataType::INT),
+                DataType::NONE,
+            ),
+            DataType::NONE,
+        );
+        match_ast_node(Some(&expr), expected);
+        match parser
+            .global_symbol_table
+            .find_symbol("test", Some(SymClass::GLOBAL))
+        {
+            Some(new_sym) => {
+                let new_sym = new_sym.borrow();
+                assert_eq!(new_sym.data_type, DataType::INT);
+                assert_eq!(new_sym.initial_value, 0);
+                assert_eq!(new_sym.sym_type, SymType::FUNCTION);
+                assert_eq!(new_sym.sym_class, SymClass::GLOBAL);
+
+                let param_sym = new_sym.members.as_ref().unwrap().borrow();
+                assert_eq!(param_sym.data_type, DataType::STRUCTPTR);
+                assert_eq!(param_sym.initial_value, 0);
+                assert_eq!(param_sym.sym_type, SymType::VARIABLE);
+                assert_eq!(param_sym.sym_class, SymClass::PARAM);
+                assert_eq!(param_sym.name, "p");
+                assert!(Rc::ptr_eq(
+                    param_sym.type_sym.as_ref().unwrap(),
+                    &struct_sym
+                ));
+            }
+            None => panic!("New symbol table entry not found"),
+        }
+    }
+
+    #[test]
+    fn parse_func_declaration_with_invalid_struct_param() {
+        let mut scanner =
+            Scanner::new_from_string(String::from("int test(struct Person *p) { return 1; }"));
+        let mut parser = Parser::new(&mut scanner).unwrap();
+        match parser.parse_global_declaration() {
+            Ok(_) => {
+                panic!("Parsing of function with invalid structt parameter should have failed.");
+            }
+
+            Err(e) => {
+                assert_eq!(e.to_string(), "Referencing undefined struct Person.");
+            }
         }
     }
 

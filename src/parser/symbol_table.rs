@@ -46,6 +46,7 @@ impl TryFrom<TokenType> for DataType {
             TokenType::CHAR => Ok(DataType::CHAR),
             TokenType::INT => Ok(DataType::INT),
             TokenType::VOID => Ok(DataType::VOID),
+            TokenType::STRUCT => Ok(DataType::STRUCT),
             _ => Err(format!(
                 "Unable to convert {} token to type.",
                 token_type.name()

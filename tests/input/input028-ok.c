@@ -3,7 +3,7 @@ struct Person {
     char *name;
 };
 struct Person person1;
-struct Person  *person2;
+struct Person *person2;
 
 int main() {
     person2 = &person1;
